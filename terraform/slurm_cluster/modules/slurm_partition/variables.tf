@@ -33,10 +33,10 @@ variable "partition_name" {
   description = "Name of Slurm partition."
   type        = string
 
-  validation {
-    condition     = can(regex("^[a-z](?:[a-z0-9]{0,6})$", var.partition_name))
-    error_message = "Variable 'partition_name' must be a match of regex '^[a-z](?:[a-z0-9]{0,6})$'."
-  }
+  # validation {
+  #   condition     = can(regex("^[a-z](?:[a-z0-9]{0,6})$", var.partition_name))
+  #   error_message = "Variable 'partition_name' must be a match of regex '^[a-z](?:[a-z0-9]{0,6})$'."
+  # }
 }
 
 variable "partition_conf" {
