@@ -366,12 +366,12 @@ variable "partitions" {
   }))
   default = []
 
-  validation {
-    condition = alltrue([
-      for x in var.partitions[*].partition : can(regex("^[a-z](?:[a-z0-9]*)$", x.partition_name))
-    ])
-    error_message = "Items 'partition_name' must be a match of regex '^[a-z](?:[a-z0-9]*)$'."
-  }
+  # validation {
+  #   condition = alltrue([
+  #     for x in var.partitions[*].partition : can(regex("^[a-z](?:[a-z0-9]*)$", x.partition_name))
+  #   ])
+  #   error_message = "Items 'partition_name' must be a match of regex '^[a-z](?:[a-z0-9]*)$'."
+  # }
 }
 
 variable "cloud_parameters" {
