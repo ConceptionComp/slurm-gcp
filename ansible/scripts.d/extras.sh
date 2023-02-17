@@ -24,6 +24,7 @@ tar -xvf pandoc-2.19.2-linux-amd64.tar.gz
 tar -vxzf sratoolkit.tar.gz
 unzip gatk-4.3.0.0.zip
 
+sed -ie 's/python/python2.7/g' gatk-4.3.0.0/gatk
 chmod +x /opt/apps/FastQC/fastqc
 
 #install STAR
@@ -43,12 +44,8 @@ make install
 
 #CLEANUP
 cd /opt/apps
-# rm cellranger-7.0.0.tar.gz
-rm v0.15.2.zip
-rm fastqc_v0.11.9.zip
-rm v1.3.3.tar.gz
-rm 0.6.7.zip
-rm samtools-1.15.1.tar.bz2
+rm -f *.gz
+rm -f *.zip
 
 # install google cloud SDK to replace snap version
 

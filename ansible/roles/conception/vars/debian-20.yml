@@ -18,3 +18,4 @@ common_packages:
 - vcftools
 - libvcflib-tools
 - libvcflib-dev
+- mono-runtime
