@@ -18,3 +18,9 @@ common_packages:
 - vcftools
 - libvcflib-tools
 - libvcflib-dev
+- mono-runtime
+
+python_packages:
+- selenium
+- pandas
+- umi_tools
