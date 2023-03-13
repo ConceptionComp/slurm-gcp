@@ -1,11 +1,10 @@
+project_id = $project_id
 
-#project_id = "<PROJECT_ID>"
-
-#slurm_cluster_name = "basic"
+slurm_cluster_name = $cluster_name
 
 region = "us-central1"
 
-enable_bigquery_load         = false
+enable_bigquery_load         = true
 enable_cleanup_compute       = true
 enable_cleanup_subscriptions = false
 enable_reconfigure           = false
@@ -178,6 +177,7 @@ partitions = [
     region             = null
     subnetwork_project = null
     subnetwork         = "default"
+    zone_target_shape = "ANY_SINGLE_ZONE"
     zone_policy_allow  = []
     zone_policy_deny   = []
   },
@@ -249,6 +249,7 @@ partitions = [
     region             = null
     subnetwork_project = null
     subnetwork         = "default"
+    zone_target_shape = "ANY_SINGLE_ZONE"
     zone_policy_allow  = []
     zone_policy_deny   = []
   },
@@ -335,6 +336,7 @@ partitions = [
     region             = null
     subnetwork_project = null
     subnetwork         = "default"
+    zone_target_shape = "ANY_SINGLE_ZONE"
     zone_policy_allow  = []
     zone_policy_deny   = []
   },
@@ -421,6 +423,7 @@ partitions = [
     region             = null
     subnetwork_project = null
     subnetwork         = "default"
+    zone_target_shape = "ANY_SINGLE_ZONE"
     zone_policy_allow  = []
     zone_policy_deny   = []
   },

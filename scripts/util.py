@@ -90,7 +90,7 @@ scripts_dir = next(
 
 # readily available compute api handle
 compute = None
-# slurm-gcp config object, could be None if not available
+# slurm-gcp config object, could be empty if not available
 cfg = NSDict()
 # caching Lookup object
 lkp = None
@@ -1088,6 +1088,10 @@ class Lookup:
     def control_host(self):
         return self.cfg.slurm_control_host
 
+    @cached_property
+    def control_host_addr(self):
+        return socket.gethostbyname(self.cfg.slurm_control_host)
+
     @property
     def control_host_port(self):
         return self.cfg.slurm_control_host_port
@@ -1095,6 +1099,22 @@ class Lookup:
     @property
     def scontrol(self):
         return Path(self.cfg.slurm_bin_dir if cfg else "") / "scontrol"
+
+    @property
+    def sinfo_bin(self):
+        return Path(self.cfg.slurm_bin_dir if cfg else "") / "sinfo"
+
+    def sinfo(self, cmd=None):
+        cmd = " ".join(str(s) for s in (self.sinfo_bin, cmd) if s is not None)
+        return run(cmd).stdout.rstrip()
+
+    @property
+    def squeue_bin(self):
+        return Path(self.cfg.slurm_bin_dir if cfg else "") / "squeue"
+
+    def squeue(self, cmd=None):
+        cmd = " ".join(str(s) for s in (self.squeue_bin, cmd) if s is not None)
+        return run(cmd).stdout.rstrip()
 
     @property
     def template_map(self):
@@ -1267,19 +1287,53 @@ class Lookup:
     def instances(self, project=None, slurm_cluster_name=None):
         slurm_cluster_name = slurm_cluster_name or self.cfg.slurm_cluster_name
         project = project or self.project
-        fields = (
-            "items.zones.instances(name,zone,status,machineType,metadata),nextPageToken"
+        instance_fields = ",".join(
+            [
+                "advancedMachineFeatures",
+                "cpuPlatform",
+                "creationTimestamp",
+                "disks",
+                "disks",
+                "fingerprint",
+                "guestAccelerators",
+                "hostname",
+                "id",
+                "kind",
+                "labelFingerprint",
+                "labels",
+                "lastStartTimestamp",
+                "lastStopTimestamp",
+                "lastSuspendedTimestamp",
+                "machineType",
+                "metadata",
+                "name",
+                "networkInterfaces",
+                "resourceStatus",
+                "scheduling",
+                "selfLink",
+                "serviceAccounts",
+                "shieldedInstanceConfig",
+                "shieldedInstanceIntegrityPolicy",
+                "sourceMachineImage",
+                "status",
+                "statusMessage",
+                "tags",
+                "zone",
+                # "deletionProtection",
+                # "startRestricted",
+            ]
         )
+        fields = f"items.zones.instances({instance_fields}),nextPageToken"
         flt = f"labels.slurm_cluster_name={slurm_cluster_name} AND name:{slurm_cluster_name}-*"
         act = self.compute.instances()
         op = act.aggregatedList(project=project, fields=fields, filter=flt)
 
         def properties(inst):
             """change instance properties to a preferred format"""
+            inst["zoneLink"] = inst["zone"]
             inst["zone"] = trim_self_link(inst["zone"])
-            machine_link = inst["machineType"]
-            inst["machineType"] = trim_self_link(machine_link)
-            inst["machineTypeLink"] = machine_link
+            inst["machineTypeLink"] = inst["machineType"]
+            inst["machineType"] = trim_self_link(inst["machineType"])
             # metadata is fetched as a dict of dicts like:
             # {'key': key, 'value': value}, kinda silly
             metadata = {i["key"]: i["value"] for i in inst["metadata"].get("items", [])}
@@ -1358,6 +1412,10 @@ class Lookup:
 
     def machine_type(self, machine_type, project=None, zone=None):
         """ """
+        custom_patt = re.compile(
+            r"((?P<family>\w+)-)?custom-(?P<cpus>\d+)-(?P<mem>\d+)"
+        )
+        custom_match = custom_patt.match(machine_type)
         if zone:
             project = project or self.project
             machine_info = ensure_execute(
@@ -1365,6 +1423,13 @@ class Lookup:
                     project=project, zone=zone, machineType=machine_type
                 )
             )
+        elif custom_match is not None:
+            groups = custom_match.groupdict()
+            cpus, mem = (groups[k] for k in ["cpus", "mem"])
+            machine_info = {
+                "guestCpus": int(cpus),
+                "memoryMb": int(mem),
+            }
         else:
             machines = self.machine_types(project=project)
             machine_info = next(iter(machines[machine_type].values()), None)
