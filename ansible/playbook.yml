@@ -58,6 +58,7 @@
       msg: Update Ansible to at least {{min_ansible_version}} to use this playbook.
 
   roles:
+  # - test
   - motd
   - common
   - kernel

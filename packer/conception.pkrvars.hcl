@@ -56,7 +56,7 @@ tags = [
 # PROVISION #
 #############
 
-slurm_version = "22.05.6"
+slurm_version = "22.05.8"
 
 # Disable some ansible roles here; they are enabled by default
 install_cuda = false
@@ -76,6 +76,7 @@ service_account_email = "default"
 
 service_account_scopes = [
   "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/devstorage.full_control",
 ]
 
 ### Builds ###
