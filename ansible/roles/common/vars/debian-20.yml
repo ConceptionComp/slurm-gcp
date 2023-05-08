@@ -19,7 +19,6 @@ common_packages:
 - automake
 - bash-completion
 - bamtools
-- bowtie2
 - build-essential
 - clang
 - curl

@@ -32,3 +32,7 @@
     extra_args: --upgrade
     executable: pip3
     state: present
+
+- name: Install Module apps
+  include_tasks: modules.yml
+  loop: "{{ apps }}"
