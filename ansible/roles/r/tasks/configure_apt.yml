@@ -30,5 +30,5 @@
 - name: Install Packages
   apt:
     name: '{{ r_packages }}'
-    # force_apt_get: yes
+    update_cache: true
     state: present

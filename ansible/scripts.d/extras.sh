@@ -9,8 +9,8 @@ apt-get update && sudo apt-get install google-cloud-cli
 
 cd /opt/apps
 
-wget http://security.ubuntu.com/ubuntu/pool/main/o/openssl1.0/libssl1.0.0_1.0.2n-1ubuntu5.11_amd64.deb
-apt-get install ./libssl1.0.0_1.0.2n-1ubuntu5.11_amd64.deb
+wget http://security.ubuntu.com/ubuntu/pool/main/o/openssl1.0/libssl1.0.0_1.0.2n-1ubuntu5_amd64.deb
+apt-get install ./libssl1.0.0_1.0.2n-1ubuntu5_amd64.deb
 
 # Install Parse
 # gcloud storage cp gs://conception-automation-misc/software/ParseBiosciences-Pipeline.1.0.2p.tar.gz .
