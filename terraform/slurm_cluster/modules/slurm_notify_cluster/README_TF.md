@@ -27,8 +27,8 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_local"></a> [local](#provider\_local) | 2.3.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.2.1 |
+| <a name="provider_local"></a> [local](#provider\_local) | ~> 2.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
 
 ## Modules
 
@@ -45,6 +45,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_project_id"></a> [project\_id](#input\_project\_id) | The Google Cloud project ID. | `string` | n/a | yes |
 | <a name="input_topic"></a> [topic](#input\_topic) | Pubsub topic name or ID. | `string` | n/a | yes |
 | <a name="input_triggers"></a> [triggers](#input\_triggers) | Additional Terraform triggers. | `map(string)` | `{}` | no |
 | <a name="input_type"></a> [type](#input\_type) | Notification type. | `string` | `"reconfig"` | no |

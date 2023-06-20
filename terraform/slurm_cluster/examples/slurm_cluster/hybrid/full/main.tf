@@ -27,6 +27,7 @@ locals {
       partition_conf                    = x.partition_conf
       partition_startup_scripts_timeout = x.partition_startup_scripts_timeout
       partition_startup_scripts         = x.partition_startup_scripts
+      partition_feature                 = x.partition_feature
       partition_name                    = x.partition_name
       partition_nodes = [for n in x.partition_nodes : {
         access_config            = n.access_config
@@ -194,5 +195,7 @@ module "slurm_cluster" {
     module.project_services,
     # Guarantee the network is created before slurm cluster
     module.slurm_network,
+    # Guarantee SA is created for instances to use
+    module.slurm_sa_iam,
   ]
 }

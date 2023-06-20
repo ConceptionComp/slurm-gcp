@@ -98,7 +98,6 @@ def find_node_status(nodename):
         find_node_status.static_nodeset = set(util.to_hostnames(lkp.static_nodelist()))
     state = lkp.slurm_node(nodename)
     inst = lkp.instance(nodename)
-    info = lkp.node_template_info(nodename)
     if inst is None:
         if state.base == "DOWN" and "POWERED_DOWN" in state.flags:
             return NodeStatus.restore
@@ -114,11 +113,12 @@ def find_node_status(nodename):
         if nodename in find_node_status.static_nodeset:
             return NodeStatus.resume
     elif (
-        "POWERED_DOWN" not in state.flags
+        state is not None
+        and "POWERED_DOWN" not in state.flags
         and "POWERING_DOWN" not in state.flags
         and inst.status == "TERMINATED"
     ):
-        if info.scheduling.preemptible:
+        if inst.scheduling.preemptible:
             return NodeStatus.preempted
         if not state.base.startswith("DOWN"):
             return NodeStatus.terminated
@@ -196,7 +196,11 @@ def sync_slurm():
     compute_instances = [
         name for name, inst in lkp.instances().items() if inst.role == "compute"
     ]
-    slurm_nodes = list(lkp.slurm_nodes().keys())
+    slurm_nodes = list(
+        name
+        for name, state in lkp.slurm_nodes().items()
+        if "DYNAMIC_NORM" not in state.flags
+    )
     all_nodes = list(
         set(
             chain(
@@ -294,7 +298,11 @@ def sync_pubsub():
                     for name, inst in lkp.instances().items()
                     if inst.role == "compute"
                 ),
-                (name for name in lkp.slurm_nodes().keys()),
+                (
+                    name
+                    for name, state in lkp.slurm_nodes().items()
+                    if "DYNAMIC_NORM" not in state.flags
+                ),
             )
         )
     )

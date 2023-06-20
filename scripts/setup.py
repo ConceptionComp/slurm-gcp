@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import argparse
 import json
 import logging
 import os
@@ -143,10 +144,9 @@ def dict_to_conf(conf, delim=" "):
     )
 
 
-def make_cloud_conf(lkp=lkp, cloud_parameters=None):
-    """generate cloud.conf snippet"""
-    if cloud_parameters is None:
-        cloud_parameters = lkp.cfg.cloud_parameters
+def conflines(cloud_parameters, lkp=lkp):
+    scripts_dir = lkp.cfg.get("install_dir", dirs.scripts)
+    no_comma_params = cloud_parameters.get("no_comma_params", False)
 
     any_gpus = any(
         lkp.template_info(node.instance_template).gpu_count > 0
@@ -154,111 +154,122 @@ def make_cloud_conf(lkp=lkp, cloud_parameters=None):
         for node in part.partition_nodes.values()
     )
 
-    def conflines(cloud_parameters):
-        scripts_dir = lkp.cfg.get("install_dir", dirs.scripts)
-        no_comma_params = cloud_parameters.get("no_comma_params", False)
-        comma_params = {
-            "PrivateData": [
-                "cloud",
-            ],
-            "LaunchParameters": [
-                "enable_nss_slurm",
-                "use_interactive_step",
-            ],
-            "SlurmctldParameters": [
-                "cloud_dns",
-                "enable_configless",
-                "idle_on_node_suspend",
-            ],
-            "SchedulerParameters": [
-                "salloc_wait_nodes",
-            ],
-            "CommunicationParameters": [
-                "NoAddrCache",
-            ],
-            "GresTypes": [
-                "gpu" if any_gpus else None,
-            ],
+    any_dynamic = any(bool(p.partition_feature) for p in lkp.cfg.partitions.values())
+    comma_params = {
+        "PrivateData": [
+            "cloud",
+        ],
+        "LaunchParameters": [
+            "enable_nss_slurm",
+            "use_interactive_step",
+        ],
+        "SlurmctldParameters": [
+            "cloud_reg_addrs" if any_dynamic else "cloud_dns",
+            "enable_configless",
+            "idle_on_node_suspend",
+        ],
+        "SchedulerParameters": [
+            "bf_continue",
+            "salloc_wait_nodes",
+        ],
+        "CommunicationParameters": [
+            "NoAddrCache",
+        ],
+        "GresTypes": [
+            "gpu" if any_gpus else None,
+        ],
+    }
+    prolog_path = Path(dirs.custom_scripts / "prolog.d")
+    epilog_path = Path(dirs.custom_scripts / "epilog.d")
+    prolog_path.mkdir(exist_ok=True)
+    epilog_path.mkdir(exist_ok=True)
+    any_exclusive = any(
+        bool(p.enable_job_exclusive) for p in lkp.cfg.partitions.values()
+    )
+    conf_options = {
+        **(comma_params if not no_comma_params else {}),
+        "Prolog": f"{prolog_path}/*" if lkp.cfg.prolog_scripts else None,
+        "Epilog": f"{epilog_path}/*" if lkp.cfg.epilog_scripts else None,
+        "PrologSlurmctld": f"{scripts_dir}/resume.py" if any_exclusive else None,
+        "EpilogSlurmctld": f"{scripts_dir}/suspend.py" if any_exclusive else None,
+        "SuspendProgram": f"{scripts_dir}/suspend.py",
+        "ResumeProgram": f"{scripts_dir}/resume.py",
+        "ResumeFailProgram": f"{scripts_dir}/suspend.py",
+        "ResumeRate": cloud_parameters.get("resume_rate", 0),
+        "ResumeTimeout": cloud_parameters.get("resume_timeout", 300),
+        "SuspendRate": cloud_parameters.get("suspend_rate", 0),
+        "SuspendTimeout": cloud_parameters.get("suspend_timeout", 300),
+        "TreeWidth": "65533" if any_dynamic else None,
+    }
+    return dict_to_conf(conf_options, delim="\n")
+
+
+def node_group_lines(node_group, part_name, lkp=lkp):
+    template_info = lkp.template_info(node_group.instance_template)
+    machine_conf = lkp.template_machine_conf(node_group.instance_template)
+
+    node_def = dict_to_conf(
+        {
+            "NodeName": "DEFAULT",
+            "State": "UNKNOWN",
+            "RealMemory": machine_conf.memory,
+            "Boards": machine_conf.boards,
+            "Sockets": machine_conf.sockets,
+            "CoresPerSocket": machine_conf.cores_per_socket,
+            "ThreadsPerCore": machine_conf.threads_per_core,
+            "CPUs": machine_conf.cpus,
+            **node_group.node_conf,
         }
-        prolog_path = Path(dirs.custom_scripts / "prolog.d")
-        epilog_path = Path(dirs.custom_scripts / "epilog.d")
-        any_exclusive = any(
-            bool(p.enable_job_exclusive) for p in lkp.cfg.partitions.values()
-        )
-        conf_options = {
-            **(comma_params if not no_comma_params else {}),
-            "Prolog": f"{prolog_path}/*" if lkp.cfg.prolog_scripts else None,
-            "Epilog": f"{epilog_path}/*" if lkp.cfg.epilog_scripts else None,
-            "PrologSlurmctld": f"{scripts_dir}/resume.py" if any_exclusive else None,
-            "EpilogSlurmctld": f"{scripts_dir}/suspend.py" if any_exclusive else None,
-            "SuspendProgram": f"{scripts_dir}/suspend.py",
-            "ResumeProgram": f"{scripts_dir}/resume.py",
-            "ResumeFailProgram": f"{scripts_dir}/suspend.py",
-            "ResumeRate": cloud_parameters.get("resume_rate", 0),
-            "ResumeTimeout": cloud_parameters.get("resume_timeout", 300),
-            "SuspendRate": cloud_parameters.get("suspend_rate", 0),
-            "SuspendTimeout": cloud_parameters.get("suspend_timeout", 300),
-        }
-        return dict_to_conf(conf_options, delim="\n")
+    )
 
-    def node_group_lines(node_group, part_name):
-        template_info = lkp.template_info(node_group.instance_template)
-        machine_conf = lkp.template_machine_conf(node_group.instance_template)
+    gres = None
+    if template_info.gpu_count:
+        gres = f"gpu:{template_info.gpu_count}"
 
-        node_def = dict_to_conf(
-            {
-                "NodeName": "DEFAULT",
-                "State": "UNKNOWN",
-                "RealMemory": machine_conf.memory,
-                "Boards": machine_conf.boards,
-                "Sockets": machine_conf.sockets,
-                "CoresPerSocket": machine_conf.cores_per_socket,
-                "ThreadsPerCore": machine_conf.threads_per_core,
-                "CPUs": machine_conf.cpus,
-                **node_group.node_conf,
-            }
-        )
-
-        gres = None
-        if template_info.gpu_count:
-            gres = f"gpu:{template_info.gpu_count}"
-
-        lines = [node_def]
-        static, dynamic = lkp.nodeset_lists(node_group, part_name)
-        nodeset = lkp.nodeset_prefix(node_group.group_name, part_name)
-        if static:
-            lines.append(
-                dict_to_conf(
-                    {
-                        "NodeName": static,
-                        "State": "CLOUD",
-                        "Gres": gres,
-                    }
-                )
-            )
-        if dynamic:
-            lines.append(
-                dict_to_conf(
-                    {
-                        "NodeName": dynamic,
-                        "State": "CLOUD",
-                        "Gres": gres,
-                    }
-                )
-            )
+    lines = [node_def]
+    static, dynamic = lkp.nodeset_lists(node_group, part_name)
+    nodeset = lkp.nodeset_prefix(node_group.group_name, part_name)
+    if static:
         lines.append(
             dict_to_conf(
-                {"NodeSet": nodeset, "Nodes": ",".join(filter(None, (static, dynamic)))}
+                {
+                    "NodeName": static,
+                    "State": "CLOUD",
+                    "Gres": gres,
+                }
             )
         )
+    if dynamic:
+        lines.append(
+            dict_to_conf(
+                {
+                    "NodeName": dynamic,
+                    "State": "CLOUD",
+                    "Gres": gres,
+                }
+            )
+        )
+    lines.append(
+        dict_to_conf(
+            {"NodeSet": nodeset, "Nodes": ",".join(filter(None, (static, dynamic)))}
+        )
+    )
 
-        return (nodeset, "\n".join(filter(None, lines)))
+    return (nodeset, "\n".join(filter(None, lines)))
 
-    def partitionlines(partition):
-        """Make a partition line for the slurm.conf"""
-        part_name = partition.partition_name
+
+def partitionlines(partition, lkp=lkp):
+    """Make a partition line for the slurm.conf"""
+    part_name = partition.partition_name
+    lines = []
+    has_nodes: bool = False
+    has_feature: bool = False
+    defmem: int = 0
+    nodesets: list = []
+
+    if len(partition.partition_nodes.values()) > 0:
         group_lines = [
-            node_group_lines(group, part_name)
+            node_group_lines(group, part_name, lkp)
             for group in partition.partition_nodes.values()
         ]
         nodesets, nodelines = zip(*group_lines)
@@ -271,20 +282,38 @@ def make_cloud_conf(lkp=lkp, cloud_parameters=None):
             defmempercpu(node.instance_template)
             for node in partition.partition_nodes.values()
         )
+        lines.extend(nodelines)
+        has_nodes = True
+    if partition.partition_feature:
+        nodelines = [
+            dict_to_conf({"NodeSet": part_name, "Feature": partition.partition_feature})
+        ]
+        lines.extend(nodelines)
+        has_feature = True
+    if has_nodes or has_feature:
+        nodes = []
+        if has_nodes:
+            nodes.extend(nodesets)
+        if has_feature:
+            nodes.append(part_name)
         line_elements = {
             "PartitionName": part_name,
-            "Nodes": ",".join(nodesets),
+            "Nodes": ",".join(nodes),
             "State": "UP",
             "DefMemPerCPU": defmem,
             "SuspendTime": 300,
             "Oversubscribe": "Exclusive" if partition.enable_job_exclusive else None,
             **partition.partition_conf,
         }
-        lines = [
-            *nodelines,
-            dict_to_conf(line_elements),
-        ]
-        return "\n".join(lines)
+        lines.extend([dict_to_conf(line_elements)])
+
+    return "\n".join(lines)
+
+
+def make_cloud_conf(lkp=lkp, cloud_parameters=None):
+    """generate cloud.conf snippet"""
+    if cloud_parameters is None:
+        cloud_parameters = lkp.cfg.cloud_parameters
 
     static_nodes = ",".join(lkp.static_nodelist())
     suspend_exc = (
@@ -300,7 +329,7 @@ def make_cloud_conf(lkp=lkp, cloud_parameters=None):
     lines = [
         FILE_PREAMBLE,
         conflines(cloud_parameters),
-        *(partitionlines(p) for p in lkp.cfg.partitions.values()),
+        *(partitionlines(p, lkp) for p in lkp.cfg.partitions.values()),
         suspend_exc,
         "\n",
     ]
@@ -392,14 +421,15 @@ def gen_cloud_gres_conf(lkp=lkp):
 
     gpu_nodes = defaultdict(list)
     for part_name, partition in lkp.cfg.partitions.items():
-        for node in partition.partition_nodes.values():
-            template_info = lkp.template_info(node.instance_template)
-            gpu_count = template_info.gpu_count
-            if gpu_count == 0:
-                continue
-            gpu_nodes[gpu_count].extend(
-                filter(None, lkp.nodeset_lists(node, part_name))
-            )
+        if len(partition.partition_nodes.values()) > 0:
+            for node in partition.partition_nodes.values():
+                template_info = lkp.template_info(node.instance_template)
+                gpu_count = template_info.gpu_count
+                if gpu_count == 0:
+                    continue
+                gpu_nodes[gpu_count].extend(
+                    filter(None, lkp.nodeset_lists(node, part_name))
+                )
 
     lines = [
         dict_to_conf(
@@ -430,8 +460,11 @@ def install_gres_conf():
 def fetch_devel_scripts():
     """download scripts from project metadata if they are present"""
 
-    meta_json = project_metadata(f"{cfg.slurm_cluster_name}-slurm-devel")
-    if not meta_json:
+    meta_json = None
+    try:
+        meta_json = project_metadata(f"{cfg.slurm_cluster_name}-slurm-devel")
+    except Exception:
+        log.debug("scripts not found in project metadata, devel mode not enabled")
         return
     metadata_devel = json.loads(meta_json)
 
@@ -462,7 +495,10 @@ def install_custom_scripts(clean=False):
     script_pattern = re.compile(
         rf"{cfg.slurm_cluster_name}-slurm-(?P<path>\S+)-script-(?P<name>\S+)"
     )
-    metadata_keys = project_metadata("/").splitlines()
+    try:
+        metadata_keys = project_metadata("/").splitlines()
+    except Exception:
+        log.error("No project metadata found, this is unexpected here")
 
     def match_name(meta_key):
         m = script_pattern.match(meta_key)
@@ -494,7 +530,14 @@ def install_custom_scripts(clean=False):
         # compute needs compute, prolog, epilog, and the matching partition
         if lkp.instance_role == "compute":
             script_types = ["compute", "prolog", "epilog"]
-            return role in script_types or (part and part == lkp.node_partition_name())
+            try:
+                return role in script_types or (
+                    part and part == lkp.node_partition_name()
+                )
+            except Exception as e:
+                # If the node is dynamic, the nodename will throw an Exception
+                log.error(e)
+                return role in script_types
         # controller downloads them all for good measure
         return True
 
@@ -595,7 +638,11 @@ def resolve_network_storage(partition_name=None):
     """Combine appropriate network_storage fields to a single list"""
 
     if lkp.instance_role == "compute":
-        partition_name = lkp.node_partition_name()
+        try:
+            partition_name = lkp.node_partition_name()
+        except Exception:
+            # External nodename, skip partition lookup
+            partition_name = None
     partition = cfg.partitions[partition_name] if partition_name else None
 
     default_mounts = (
@@ -663,7 +710,7 @@ def setup_network_storage():
         local_mount = Path(mount.local_mount)
         remote_mount = mount.remote_mount
         fs_type = mount.fs_type
-        server_ip = mount.server_ip
+        server_ip = mount.server_ip or ""
         local_mount.mkdirp()
 
         log.info(
@@ -715,7 +762,6 @@ def mount_fstab(mounts):
     from more_executors import Executors, ExceptionRetryPolicy
 
     def mount_path(path):
-
         log.info(f"Waiting for '{path}' to be mounted...")
         try:
             run(f"mount {path}", timeout=120)
@@ -754,7 +800,7 @@ def munge_mount_handler():
     mount = cfg.munge_mount
     server_ip = (
         mount.server_ip
-        if mount.server_ip is not None
+        if mount.server_ip
         else (cfg.slurm_control_addr or cfg.slurm_control_host)
     )
     remote_mount = mount.remote_mount
@@ -779,7 +825,6 @@ def munge_mount_handler():
             server_ip,
             str(local_mount),
         ]
-        run(cmd, timeout=120)
     else:
         if remote_mount is None:
             remote_mount = Path("/etc/munge")
@@ -790,7 +835,21 @@ def munge_mount_handler():
             f"{server_ip}:{remote_mount}",
             str(local_mount),
         ]
-        run(cmd, timeout=120)
+    # wait max 120s for munge mount
+    timeout = 120
+    for retry, wait in enumerate(util.backoff_delay(0.5, timeout), 1):
+        try:
+            run(cmd, timeout=timeout)
+            break
+        except Exception as e:
+            log.error(
+                f"munge mount failed: '{cmd}' {e}, try {retry}, waiting {wait:0.2f}s"
+            )
+            time.sleep(wait)
+            err = e
+            continue
+    else:
+        raise err
 
     log.info(f"Copy munge.key from: {local_mount}")
     shutil.copy2(Path(local_mount / "munge.key"), munge_key)
@@ -812,21 +871,21 @@ def setup_nfs_exports():
     # The controller only needs to set up exports for cluster-internal mounts
     # switch the key to remote mount path since that is what needs exporting
     mounts = resolve_network_storage()
-    # controller mounts
-    _, con_mounts = partition_mounts(mounts)
-    con_mounts = {m.remote_mount: m for m in con_mounts}
     # manually add munge_mount
-    con_mounts.update(
-        {
-            dirs.munge: {
+    mounts.append(
+        NSDict(
+            {
                 "server_ip": cfg.munge_mount.server_ip,
                 "remote_mount": cfg.munge_mount.remote_mount,
                 "local_mount": Path(f"{dirs.munge}_tmp"),
                 "fs_type": cfg.munge_mount.fs_type,
                 "mount_options": cfg.munge_mount.mount_options,
             }
-        }
+        )
     )
+    # controller mounts
+    _, con_mounts = partition_mounts(mounts)
+    con_mounts = {m.remote_mount: m for m in con_mounts}
     for part in cfg.partitions:
         # get internal mounts for each partition by calling
         # prepare_network_mounts as from a node in each partition
@@ -893,6 +952,13 @@ def setup_slurmd_cronjob():
         ),
         timeout=30,
     )
+
+
+def setup_munge_dir():
+    # Ubuntu 22.04 LTS now assumes this directory for it's run file
+    run_dir = Path("/run/munge")
+    run_dir.mkdir(exist_ok=True)
+    shutil.chown(run_dir, user="munge", group="munge")
 
 
 def setup_munge_key():
@@ -974,7 +1040,6 @@ innodb_lock_wait_timeout=900
 
 
 def configure_dirs():
-
     for p in dirs.values():
         p.mkdirp()
     util.chown_slurm(dirs.slurm)
@@ -1000,7 +1065,7 @@ def configure_dirs():
     scripts_log.symlink_to(dirs.log)
 
 
-def setup_controller():
+def setup_controller(args):
     """Run controller setup"""
     log.info("Setting up controller")
     util.chown_slurm(dirs.scripts / "config.yaml", mode=0o600)
@@ -1015,6 +1080,7 @@ def setup_controller():
     install_cgroup_conf()
 
     setup_jwt_key()
+    setup_munge_dir()
     setup_munge_key()
 
     if cfg.controller_secondary_disk:
@@ -1073,7 +1139,7 @@ def setup_controller():
     pass
 
 
-def setup_login():
+def setup_login(args):
     """run login node setup"""
     log.info("Setting up login")
     slurmctld_host = f"{lkp.control_host}"
@@ -1089,6 +1155,7 @@ def setup_login():
     install_custom_scripts()
 
     setup_network_storage()
+    setup_munge_dir()
     setup_slurmd_cronjob()
     run("systemctl restart munge")
     run("systemctl enable slurmd", timeout=30)
@@ -1103,7 +1170,7 @@ def setup_login():
     log.info("Done setting up login")
 
 
-def setup_compute():
+def setup_compute(args):
     """run compute node setup"""
     log.info("Setting up compute")
     util.chown_slurm(dirs.scripts / "config.yaml", mode=0o600)
@@ -1114,6 +1181,9 @@ def setup_compute():
         f"-N {lkp.hostname}",
         f'--conf-server="{slurmctld_host}:{lkp.control_host_port}"',
     ]
+    if args.slurmd_feature is not None:
+        slurmd_options.append(f'--conf="Feature={args.slurmd_feature}"')
+        slurmd_options.append("-Z")
     sysconf = f"""SLURMD_OPTIONS='{" ".join(slurmd_options)}'"""
     update_system_config("slurmd", sysconf)
     install_custom_scripts()
@@ -1127,6 +1197,7 @@ def setup_compute():
 
     run_custom_scripts()
 
+    setup_munge_dir()
     setup_slurmd_cronjob()
     run("systemctl restart munge", timeout=30)
     run("systemctl enable slurmd", timeout=30)
@@ -1143,8 +1214,7 @@ def setup_compute():
     log.info("Done setting up compute")
 
 
-def main():
-
+def main(args):
     start_motd()
     configure_dirs()
     fetch_devel_scripts()
@@ -1159,20 +1229,31 @@ def main():
         lkp.instance_role,
         lambda: log.fatal(f"Unknown node role: {lkp.instance_role}"),
     )
-    setup()
+    setup(args)
 
     end_motd()
 
 
 if __name__ == "__main__":
     util.chown_slurm(LOGFILE, mode=0o600)
+
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--slurmd-feature",
+        dest="slurmd_feature",
+        help="Feature for slurmd to register with. Controller ignores this option.",
+    )
+    args = parser.parse_args()
+
     util.config_root_logger(filename, logfile=LOGFILE)
     sys.excepthook = util.handle_exception
 
     lkp = util.Lookup(cfg)  # noqa F811
 
     try:
-        main()
+        main(args)
     except subprocess.TimeoutExpired as e:
         log.error(
             f"""TimeoutExpired:

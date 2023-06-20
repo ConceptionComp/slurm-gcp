@@ -19,52 +19,41 @@
 project_id = "<PROJECT_ID>"
 zone       = "us-central1-a"
 
+# prefix = null
+
 #########
 # IMAGE #
 #########
 
 # NOTE: Your Project ID will be automatically appended
-source_image_project_id = [
-  "rhel-cloud",
-  "centos-cloud",
-  "cloud-hpc-image-public",
-  "debian-cloud",
-  "ubuntu-os-cloud",
-]
+source_image_project_id = "cloud-hpc-image-public"
 
-# *NOT* intended for production use
-# skip_create_image = true
+#source_image        = null
+source_image_family = "hpc-centos-7"
 
-###########
-# NETWORK #
-###########
-
-# network_project_id = "<NETWORK_PROJECT_ID>"
-
-# subnetwork = "<SUBNETWORK_ID>"
+# disk_type = "pd-standard"
+# disk_size = 32
+# machine_type = "n1-standard-16"
 
 tags = [
   # "tag0",
   # "tag1",
 ]
 
+# *NOT* intended for production use
+# skip_create_image = true
+
 #############
 # PROVISION #
 #############
 
-slurm_version = "22.05.8"
+slurm_version = "22.05.9"
 
 # Disable some ansible roles here; they are enabled by default
 # install_cuda = false
 # install_ompi = false
 # install_lustre = false
 # install_gcsfuse = false
-
-prefix = "schedmd"
-
-##########
-# BUILDS #
-##########
 
 ### Service Account ###
 
@@ -74,110 +63,12 @@ service_account_scopes = [
   "https://www.googleapis.com/auth/cloud-platform",
 ]
 
-### Builds ###
+###########
+# NETWORK #
+###########
 
-builds = [
-  {
-    name = "centos-7"
-    ### image ###
-    source_image        = null
-    source_image_family = "centos-7"
-    image_licenses      = null
-    labels              = null
-
-    ### ssh ###
-    ssh_username = "packer"
-    ssh_password = null
-
-    ### instance ###
-    machine_type = "n1-standard-4"
-    preemptible  = false
-
-    ### root of trust ###
-    enable_secure_boot          = null
-    enable_vtpm                 = null
-    enable_integrity_monitoring = null
-
-    ### storage ###
-    disk_size = 32
-    disk_type = null
-  },
-  {
-    name = "hpc-centos-7"
-    ### image ###
-    source_image        = null
-    source_image_family = "hpc-centos-7"
-    image_licenses      = null
-    labels              = null
-
-    ### ssh ###
-    ssh_username = "packer"
-    ssh_password = null
-
-    ### instance ###
-    machine_type = "n1-standard-4"
-    preemptible  = false
-
-    ### root of trust ###
-    enable_secure_boot          = null
-    enable_vtpm                 = null
-    enable_integrity_monitoring = null
-
-    ### storage ###
-    disk_size = 32
-    disk_type = null
-  },
-  {
-    name = "debian-10"
-    ### image ###
-    source_image        = null
-    source_image_family = "debian-10"
-    image_licenses      = null
-    labels              = null
-
-    ### ssh ###
-    ssh_username = "packer"
-    ssh_password = null
-
-    ### instance ###
-    machine_type = "n1-standard-4"
-    preemptible  = false
-
-    ### root of trust ###
-    enable_secure_boot          = null
-    enable_vtpm                 = null
-    enable_integrity_monitoring = null
-
-    ### storage ###
-    disk_size = 32
-    disk_type = null
-  },
-  {
-    name = "ubuntu-2004-lts"
-    ### image ###
-    source_image        = null
-    source_image_family = "ubuntu-2004-lts"
-    image_licenses      = null
-    labels              = null
-
-    ### ssh ###
-    ssh_username = "packer"
-    ssh_password = null
-
-    ### instance ###
-    machine_type = "n1-standard-4"
-    preemptible  = false
-
-    ### root of trust ###
-    enable_secure_boot          = null
-    enable_vtpm                 = null
-    enable_integrity_monitoring = null
-
-    ### storage ###
-    disk_size = 32
-    disk_type = null
-  },
-]
+# network_project_id = "<NETWORK_PROJECT_ID>"
+# subnetwork = "<SUBNETWORK_ID>"
 
 # add extra verbosity arguments to ensure stdout/stderr appear in output
 extra_ansible_provisioners = [
@@ -188,3 +79,5 @@ extra_ansible_provisioners = [
   #    user = null
   #  },
 ]
+
+# More options are listed in the variables.pkr.hcl

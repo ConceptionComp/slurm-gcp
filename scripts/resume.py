@@ -16,6 +16,7 @@
 # limitations under the License.
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -264,14 +265,16 @@ def resume_nodes(nodelist, placement_groups=None, exclusive_job=None):
         zip(inserts.keys(), map_with_futures(ensure_execute, inserts.values()))
     )
     log.debug(f"bulk_ops={yaml.safe_dump(bulk_ops)}")
-    started = {group: op for group, (op, err) in bulk_ops.items() if err is None}
+    started = {
+        group: op for group, op in bulk_ops.items() if not isinstance(op, Exception)
+    }
     failed = {
-        group: (op, err) for group, (op, err) in bulk_ops.items() if err is not None
+        group: err for group, err in bulk_ops.items() if isinstance(err, Exception)
     }
     if failed:
-        failed_reqs = [f"{e}" for _, (_, e) in failed.items()]
+        failed_reqs = [str(e) for e in failed.items()]
         log.error("bulkInsert API failures: {}".format("; ".join(failed_reqs)))
-        for ident, (_, exc) in failed.items():
+        for ident, exc in failed.items():
             down_nodes(grouped_nodes[ident].nodes, exc._get_reason())
 
     if log.isEnabledFor(logging.DEBUG):
@@ -310,13 +313,13 @@ def resume_nodes(nodelist, placement_groups=None, exclusive_job=None):
             log.error(
                 f"{count} instances failed to start: {code} ({hostlist}) operationGroupId={group_id}"
             )
-            if code != "RESOURCE_ALREADY_EXISTS":
-                down_nodes(hostlist, code)
             failed_node, failed_op = next(iter(failed_nodes.items()))
             msg = "; ".join(
                 f"{err['code']}: {err['message'] if 'message' in err else 'no message'}"
                 for err in failed_op["error"]["errors"]
             )
+            if code != "RESOURCE_ALREADY_EXISTS":
+                down_nodes(hostlist, msg)
             log.error(
                 f"errors from insert for node '{failed_node}' ({failed_op['name']}): {msg}"
             )
@@ -338,10 +341,31 @@ def resume_nodes(nodelist, placement_groups=None, exclusive_job=None):
         execute_with_futures(subscription_create, nodelist)
 
 
+def update_job_comment(nodelist, comment):
+    resume_data = get_resume_file_data()
+    if resume_data is None:
+        log.error("Cannot update and notify jobs with API failures.")
+        return
+    else:
+        resume_data = NSDict(resume_data)
+    if isinstance(nodelist, list):
+        nodelist = util.to_hostlist(nodelist)
+
+    job_list = (
+        job
+        for job in resume_data.jobs
+        if any(map(lambda each: each in nodelist, to_hostlist(job.nodes)))
+    )
+    for job in job_list:
+        run(f"{lkp.scontrol} update jobid={job.job_id} admincomment='{comment}'")
+        run(f"{lkp.scontrol} notify {job.job_id} '{comment}'")
+
+
 def down_nodes(nodelist, reason):
     """set nodes down with reason"""
     if isinstance(nodelist, list):
         nodelist = util.to_hostlist(nodelist)
+    update_job_comment(nodelist, reason)
     run(f"{lkp.scontrol} update nodename={nodelist} state=down reason='{reason}'")
 
 
@@ -384,14 +408,31 @@ def create_placement_groups(job_id, node_list, partition_name):
         group: create_placement_request(group, region)
         for group, incl_nodes in groups.items()
     }
-    done, failed = batch_execute(requests)
+    submitted, failed = batch_execute(requests)
+    any_failures = False
     if failed:
         reqs = [f"{e}" for _, e in failed.values()]
+        log.fatal("failed to create placement policies: {}".format("; ".join(reqs)))
+        any_failures = True
+    operations = {group: wait_for_operation(op) for group, op in submitted.items()}
+    for group, op in operations.items():
+        if "error" in op:
+            msg = "; ".join(
+                f"{err['code']}: {err['message'] if 'message' in err else 'no message'}"
+                for err in op["error"]["errors"]
+            )
+            log.error(
+                f"placement group failed to create: '{group}' ({op['name']}): {msg}"
+            )
+            any_failures = True
+
+    if any_failures:
         # delete any placement groups that managed to be created.
         delete_placement_groups(job_id, region, partition_name)
-        log.fatal("failed to create placement policies: {}".format("; ".join(reqs)))
         exit(1)
-    log.info(f"created {len(done)} placement groups ({to_hostlist(done.keys())})")
+    log.info(
+        f"created {len(operations)} placement groups ({to_hostlist(operations.keys())})"
+    )
     return groups
 
 
@@ -404,14 +445,11 @@ def valid_placement_nodes(job_id, nodelist):
     valid_types = ["a2", "c2", "c2d", "c3", "n2", "n2d"]
     for prefix, machine_type in machine_types.items():
         if machine_type.split("-")[0] not in valid_types:
-            log.error(f"Unsupported machine type for placement policy: {machine_type}.")
+            log.warn(f"Unsupported machine type for placement policy: {machine_type}.")
             fail = True
     if fail:
-        log.error(
+        log.warn(
             f"Please use a valid machine type with placement policy: ({','.join(valid_types)})"
-        )
-        hold_job(
-            job_id, "Node machine type in partition does not support placement policy."
         )
         return False
     return True
@@ -434,9 +472,24 @@ def prolog_resume_nodes(job_id, nodelist):
         placement_groups = create_placement_groups(
             job_id, nodes, partition.partition_name
         )
-        if not valid_placement_nodes(job_id, nodelist):
-            return
+        valid_placement_nodes(job_id, nodelist)
     resume_nodes(nodes, placement_groups, exclusive_job=job_id)
+
+
+def get_resume_file_data():
+    # Only ResumeProgram will have this
+    SLURM_RESUME_FILE = os.getenv("SLURM_RESUME_FILE")
+    obj = None
+
+    if SLURM_RESUME_FILE is not None:
+        resume_data = open(SLURM_RESUME_FILE)
+        obj = json.loads(resume_data.read())
+    else:
+        log.warning(
+            "SLURM_RESUME_FILE was not in environment. Cannot get detailed job, node, partition allocation data."
+        )
+
+    return obj
 
 
 def main(nodelist, job_id, force=False):
@@ -453,7 +506,7 @@ def main(nodelist, job_id, force=False):
     cloud_nodes, local_nodes = lkp.filter_nodes(nodes)
     if len(local_nodes) > 0:
         log.debug(
-            f"Ignoring local nodes '{util.to_hostlist(local_nodes)}' from '{nodelist}'"
+            f"Ignoring slurm-gcp external nodes '{util.to_hostlist(local_nodes)}' from '{nodelist}'"
         )
     if len(cloud_nodes) > 0:
         log.debug(

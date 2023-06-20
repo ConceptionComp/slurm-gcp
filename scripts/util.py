@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import httplib2
 import importlib.util
 import inspect
 import json
 import logging
 import logging.config
+import math
 import os
 import re
 import shelve
@@ -42,6 +42,7 @@ required_modules = [
     ("requests", "requests"),
     ("yaml", "yaml"),
     ("addict", "addict"),
+    ("httplib2", "httplib2"),
 ]
 missing_imports = False
 for module, name in required_modules:
@@ -57,6 +58,7 @@ from google.oauth2 import service_account  # noqa: E402
 import googleapiclient.discovery  # noqa: E402
 import google_auth_httplib2  # noqa: E402
 from googleapiclient.http import set_user_agent  # noqa: E402
+import httplib2  # noqa: E402
 
 from requests import get as get_url  # noqa: E402
 from requests.exceptions import RequestException  # noqa: E402
@@ -126,6 +128,11 @@ slurmdirs = NSDict(
         )
     }
 )
+
+
+yaml.SafeDumper.yaml_representers[
+    None
+] = lambda self, data: yaml.representer.SafeRepresenter.represent_str(self, str(data))
 
 
 class LogFormatter(logging.Formatter):
@@ -361,7 +368,13 @@ def map_with_futures(func, seq):
             future = exe.submit(func, i)
             futures.append(future)
         for future in futures:
-            yield future.result(), future.exception()
+            # Will be result or raise Exception
+            res = None
+            try:
+                res = future.result()
+            except Exception as e:
+                res = e
+            yield res
 
 
 def is_exclusive_node(node):
@@ -451,7 +464,9 @@ def new_config(config):
         ),
     )
     for netstore in network_storage_iter:
-        if netstore.server_ip is None or netstore.server_ip == "$controller":
+        if netstore != "gcsfuse" and (
+            netstore.server_ip is None or netstore.server_ip == "$controller"
+        ):
             netstore.server_ip = cfg.slurm_control_host
     return cfg
 
@@ -463,16 +478,21 @@ def config_from_metadata():
         return NSDict()
 
     metadata_key = f"{slurm_cluster_name}-slurm-config"
-    for retry, wait in enumerate(backoff_delay(0.25, count=4, timeout=12)):
-        config_yaml = project_metadata.__wrapped__(metadata_key)
-        if config_yaml is None:
+    for retry, wait in enumerate(backoff_delay(0.25, timeout=5, count=3)):
+        try:
+            config_yaml = project_metadata.__wrapped__(metadata_key)
+            break
+        except Exception:
             log.warning(f"config not found in project metadata, retry {retry}")
             sleep(wait)
             continue
-        else:
-            break
     else:
-        config_yaml = instance_metadata("attributes/slurm-config")
+        try:
+            config_yaml = instance_metadata("attributes/slurm-config")
+        except Exception:
+            log.warning(
+                "config also not found in instance metadata, proceeding anyway."
+            )
     cfg = new_config(yaml.safe_load(config_yaml or ""))
     return cfg
 
@@ -717,10 +737,10 @@ def find_ratio(a, n, s, r0=None):
         rn = r**n
         return (a * (rn * (n * rm1 - r) + r)) / (r * rm1**2)
 
-    MIN_DR = 0.001  # negligible change
+    MIN_DR = 0.0001  # negligible change
     r = r0
     # print(f"r(0)={r0}")
-    MAX_TRIES = 32
+    MAX_TRIES = 64
     for i in range(1, MAX_TRIES + 1):
         try:
             dr = f(r) / df(r)
@@ -738,7 +758,7 @@ def find_ratio(a, n, s, r0=None):
     return r
 
 
-def backoff_delay(start, count: int, timeout=None, ratio=None):
+def backoff_delay(start, timeout=None, ratio=None, count: int = 0):
     """generates `count` waits starting at `start`
     sum of waits is `timeout` or each one is `ratio` bigger than the last
     the last wait is always 0"""
@@ -746,8 +766,17 @@ def backoff_delay(start, count: int, timeout=None, ratio=None):
     assert (timeout is None) ^ (ratio is None)
     assert ratio is None or ratio > 0
     assert timeout is None or timeout >= start
-    assert count > 1 and isinstance(count, int)
+    assert (count > 1 or timeout is not None) and isinstance(count, int)
     assert start > 0
+
+    if count == 0:
+        # Equation for auto-count is tuned to have a max of
+        # ~int(timeout) counts with a start wait of <0.01.
+        # Increasing start wait decreases count eg.
+        # backoff_delay(10, timeout=60) -> count = 5
+        count = int(
+            (timeout / ((start + 0.05) ** (1 / 2)) + 2) // math.log(timeout + 2)
+        )
 
     yield start
     # if ratio is set:
@@ -776,8 +805,8 @@ def get_metadata(path, root=ROOT_URL):
         resp.raise_for_status()
         return resp.text
     except RequestException:
-        log.error(f"Error while getting metadata from {url}")
-        return None
+        log.debug(f"metadata not found ({url})")
+        raise Exception(f"failed to get_metadata from {url}")
 
 
 @lru_cache(maxsize=None)
@@ -835,7 +864,7 @@ def retry_exception(exc):
 def ensure_execute(request):
     """Handle rate limits and socket time outs"""
 
-    for retry, wait in enumerate(backoff_delay(0.5, count=20, timeout=10 * 60)):
+    for retry, wait in enumerate(backoff_delay(0.5, timeout=10 * 60, count=20)):
         try:
             return request.execute()
         except googleapiclient.errors.HttpError as e:
@@ -1249,7 +1278,7 @@ class Lookup:
         nodes = {
             node: state
             for node, state in map(make_node_tuple, node_lines)
-            if "CLOUD" in state.flags
+            if "CLOUD" in state.flags or "DYNAMIC_NORM" in state.flags
         }
         return nodes
 
@@ -1468,7 +1497,7 @@ class Lookup:
     def template_cache(self, writeback=False):
         flag = "c" if writeback else "r"
         err = None
-        for wait in backoff_delay(0.125, count=20, timeout=60):
+        for wait in backoff_delay(0.125, timeout=60, count=20):
             try:
                 cache = shelve.open(
                     str(self.template_cache_path), flag=flag, writeback=writeback
@@ -1512,7 +1541,11 @@ class Lookup:
         # del template.metadata
 
         # translate gpus into an easier-to-read format
-        if template.guestAccelerators:
+        machine_info = self.machine_type(template.machineType, project=project)
+        if machine_info.accelerators:
+            template.gpu_type = machine_info.accelerators[0].guestAcceleratorType
+            template.gpu_count = machine_info.accelerators[0].guestAcceleratorCount
+        elif template.guestAccelerators:
             template.gpu_type = template.guestAccelerators[0].acceleratorType
             template.gpu_count = template.guestAccelerators[0].acceleratorCount
         else:
@@ -1542,10 +1575,11 @@ class Lookup:
 # Define late globals
 cfg = load_config_file(CONFIG_FILE)
 if not cfg:
-    cfg = config_from_metadata()
+    try:
+        cfg = config_from_metadata()
+    except Exception:
+        log.warning("config not found in metadata")
     if cfg:
         save_config(cfg, CONFIG_FILE)
-    else:
-        log.error("config metadata unavailable")
 
 lkp = Lookup(cfg)

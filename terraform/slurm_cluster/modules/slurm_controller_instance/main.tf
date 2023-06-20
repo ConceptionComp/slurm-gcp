@@ -188,6 +188,12 @@ resource "google_compute_project_metadata_item" "config" {
 
   key   = "${var.slurm_cluster_name}-slurm-config"
   value = jsonencode(local.metadata_config)
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "google_compute_project_metadata_item" "slurm_conf" {
@@ -195,6 +201,12 @@ resource "google_compute_project_metadata_item" "slurm_conf" {
 
   key   = "${var.slurm_cluster_name}-slurm-tpl-slurm-conf"
   value = data.local_file.slurm_conf_tpl.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "google_compute_project_metadata_item" "cgroup_conf" {
@@ -202,6 +214,12 @@ resource "google_compute_project_metadata_item" "cgroup_conf" {
 
   key   = "${var.slurm_cluster_name}-slurm-tpl-cgroup-conf"
   value = data.local_file.cgroup_conf_tpl.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "google_compute_project_metadata_item" "slurmdbd_conf" {
@@ -209,6 +227,12 @@ resource "google_compute_project_metadata_item" "slurmdbd_conf" {
 
   key   = "${var.slurm_cluster_name}-slurm-tpl-slurmdbd-conf"
   value = data.local_file.slurmdbd_conf_tpl.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 ###################
@@ -238,6 +262,12 @@ resource "google_compute_project_metadata_item" "controller_startup_scripts" {
 
   key   = "${var.slurm_cluster_name}-slurm-controller-script-${each.key}"
   value = each.value.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "google_compute_project_metadata_item" "compute_startup_scripts" {
@@ -250,6 +280,12 @@ resource "google_compute_project_metadata_item" "compute_startup_scripts" {
 
   key   = "${var.slurm_cluster_name}-slurm-compute-script-${each.key}"
   value = each.value.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "google_compute_project_metadata_item" "prolog_scripts" {
@@ -262,6 +298,12 @@ resource "google_compute_project_metadata_item" "prolog_scripts" {
 
   key   = "${var.slurm_cluster_name}-slurm-prolog-script-${each.key}"
   value = each.value.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "google_compute_project_metadata_item" "epilog_scripts" {
@@ -274,6 +316,12 @@ resource "google_compute_project_metadata_item" "epilog_scripts" {
 
   key   = "${var.slurm_cluster_name}-slurm-epilog-script-${each.key}"
   value = each.value.content
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 ##################
@@ -348,7 +396,7 @@ module "slurm_pubsub" {
 
   pull_subscriptions = [
     {
-      name                    = module.slurm_controller_instance.instances_details[0].name
+      name                    = module.slurm_controller_instance.names[0]
       ack_deadline_seconds    = 120
       enable_message_ordering = true
       maximum_backoff         = "300s"
@@ -365,7 +413,7 @@ resource "google_pubsub_subscription_iam_member" "controller_pull_subscription_s
   count = var.enable_reconfigure ? 1 : 0
 
   project      = var.project_id
-  subscription = module.slurm_controller_instance.instances_details[0].name
+  subscription = module.slurm_controller_instance.names[0]
   role         = "roles/pubsub.subscriber"
   member       = "serviceAccount:${local.service_account_email}"
 
@@ -416,8 +464,9 @@ module "reconfigure_notify" {
 
   count = var.enable_reconfigure ? 1 : 0
 
-  topic = google_pubsub_topic.this[0].name
-  type  = "reconfig"
+  topic      = google_pubsub_topic.this[0].name
+  project_id = var.project_id
+  type       = "reconfig"
 
   triggers = {
     compute_list  = join(",", local.compute_list)
@@ -444,8 +493,9 @@ module "devel_notify" {
 
   count = var.enable_devel && var.enable_reconfigure ? 1 : 0
 
-  topic = google_pubsub_topic.this[0].name
-  type  = "devel"
+  topic      = google_pubsub_topic.this[0].name
+  project_id = var.project_id
+  type       = "devel"
 
   triggers = {
     devel = sha256(module.slurm_metadata_devel[0].metadata.value)
@@ -470,6 +520,7 @@ module "cleanup_compute_nodes" {
   count = var.enable_cleanup_compute ? 1 : 0
 
   slurm_cluster_name = var.slurm_cluster_name
+  project_id         = var.project_id
   when_destroy       = true
 }
 
@@ -489,6 +540,7 @@ module "reconfigure_critical" {
   count = var.enable_reconfigure ? 1 : 0
 
   slurm_cluster_name = var.slurm_cluster_name
+  project_id         = var.project_id
 
   triggers = merge(
     {
@@ -519,6 +571,7 @@ module "reconfigure_partitions" {
   count = var.enable_reconfigure ? 1 : 0
 
   slurm_cluster_name = var.slurm_cluster_name
+  project_id         = var.project_id
   exclude_list       = local.compute_list
 
   triggers = {
@@ -542,5 +595,6 @@ module "cleanup_resource_policies" {
   count = var.enable_cleanup_compute ? 1 : 0
 
   slurm_cluster_name = var.slurm_cluster_name
+  project_id         = var.project_id
   when_destroy       = true
 }

@@ -28,8 +28,8 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 4.55.0 |
-| <a name="provider_local"></a> [local](#provider\_local) | 2.3.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | >= 3.43, < 5.0 |
+| <a name="provider_local"></a> [local](#provider\_local) | ~> 2.0 |
 
 ## Modules
 
@@ -73,5 +73,6 @@ No modules.
 | <a name="output_available_zones"></a> [available\_zones](#output\_available\_zones) | List of available zones in region |
 | <a name="output_instances_details"></a> [instances\_details](#output\_instances\_details) | List of all details for compute instances |
 | <a name="output_instances_self_links"></a> [instances\_self\_links](#output\_instances\_self\_links) | List of self-links for compute instances |
+| <a name="output_names"></a> [names](#output\_names) | List of available zones in region |
 | <a name="output_slurm_instances"></a> [slurm\_instances](#output\_slurm\_instances) | List of all resource objects for compute instances |
 <!-- END OF PRE-COMMIT-TERRAFORM DOCS HOOK -->

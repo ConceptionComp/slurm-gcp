@@ -1,19 +1,30 @@
 # Slurm on Google Cloud Platform
 
+#### NOTICE
+
+The naming scheme for SchedMD published images has changed with release 5.7.3.
+This is to ensure no incompatibilities between the terraform modules and old
+images that could be in the same family as a newer release. From now on, the
+image family includes the slurm-gcp major and minor version instead of the slurm
+version.
+
+See [Images doc](./docs/images.md#published-image-family) for the latest
+published images.
+
 [FAQ](./docs/faq.md) | [Troubleshooting](./docs/troubleshooting.md) |
 [Glossary](./docs/glossary.md)
 
-<!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
+<!-- mdformat-toc start --slug=github --no-anchors --maxlevel=3 --minlevel=2 -->
 
-- [Slurm on Google Cloud Platform](#slurm-on-google-cloud-platform)
-  - [Overview](#overview)
-    - [SchedMD](#schedmd)
-  - [Cluster Configurations](#cluster-configurations)
-    - [Cloud](#cloud)
-    - [Hybrid](#hybrid)
-    - [Multi-Cluster/Federation](#multi-clusterfederation)
-  - [Upgrade to v5](#upgrade-to-v5)
-  - [Help and Support](#help-and-support)
+- [Overview](#overview)
+- [Image Support](#image-support)
+  - [SchedMD](#schedmd)
+- [Cluster Configurations](#cluster-configurations)
+  - [Cloud](#cloud)
+  - [Hybrid](#hybrid)
+  - [Multi-Cluster/Federation](#multi-clusterfederation)
+- [Upgrade to v5](#upgrade-to-v5)
+- [Help and Support](#help-and-support)
 
 <!-- mdformat-toc end -->
 
@@ -32,7 +43,11 @@ manage and deploy [Slurm clusters](./docs/glossary.md#slurm) and other
 supporting infrastrucutre via
 [HPC Blueprints](https://cloud.google.com/hpc-toolkit/docs/setup/hpc-blueprint).
 
-See [supported Operating Systems](./docs/images.md#supported-operating-systems).
+## Image Support
+
+See [supported Operating Systems](./docs/images.md#supported-operating-systems)
+and [published Image Family](./docs/images.md#published-image-family) for
+machine image support.
 
 ### SchedMD
 

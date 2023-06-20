@@ -27,8 +27,8 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_local"></a> [local](#provider\_local) | 2.3.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.2.1 |
+| <a name="provider_local"></a> [local](#provider\_local) | ~> 2.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
 
 ## Modules
 
@@ -47,6 +47,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_partition_name"></a> [partition\_name](#input\_partition\_name) | Partition name. | `string` | `""` | no |
+| <a name="input_project_id"></a> [project\_id](#input\_project\_id) | The project ID | `string` | n/a | yes |
 | <a name="input_slurm_cluster_name"></a> [slurm\_cluster\_name](#input\_slurm\_cluster\_name) | Cluster name, for resource filtering. | `string` | n/a | yes |
 | <a name="input_triggers"></a> [triggers](#input\_triggers) | Additional Terraform triggers. | `map(string)` | `{}` | no |
 | <a name="input_when_destroy"></a> [when\_destroy](#input\_when\_destroy) | Run only on `terraform destroy`? | `bool` | `false` | no |

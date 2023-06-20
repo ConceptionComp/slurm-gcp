@@ -2,7 +2,89 @@
 
 All notable changes to this project will be documented in this file.
 
-## \[Next\]
+## \[5.7.4\]
+
+- Set EOL of published centos-7 image to Aug 2023. If you need this image for
+  longer, consider switching to hpc-centos-7, which will have support through
+  Jan 2024.
+- Allow metadata key `slurmd_feature` to initiate dynamic node setup.
+- Fix dynamic nodes using cloud_dns instead of cloud_reg_addrs.
+- Disable TreeWidth when dynamic nodes are configured.
+- Fix dynamic nodes failing to download custom scripts.
+- Fix slurmsync with only dynamic nodes in system.
+- Fix NVIDIA driver install after kernel upgrade for rocky-linux-8.
+
+## \[5.7.3\]
+
+- Fix detecting gpus on certain machine types.
+- Forward additional error information to node reason and salloc/srun.
+- Fix warning on missing python library httplib2.
+- Fix lustre support in images by installing the latest available client version
+  for each OS.
+- Change image name format to use Slurm-GCP version instead of the Slurm
+  version. eg. slurm-gcp-5-7-hpc-centos-7
+- Disable Lustre install for Debian 11 because it is currently incompatible. It
+  wasn't working anyway.
+
+## \[5.7.2\]
+
+- Fix DefMemPerCPU on partitions that only contain dynamic nodes.
+- Add hpc-rocky-linux-8 image build using
+  cloud-hpc-image-public/hpc-rocky-linux-8 as a base.
+- Update default slurm to 22.05.9
+
+## \[5.7.1\]
+
+- Fix regression in load_bq.py.
+- Fix slurmsync.py handling of pub/sub subscriptions when enable_reconfigure.
+- Add retries to munge mount to handle the case of attempted mount before the
+  controller is ready.
+- Fix partition generation with both nodes and feature.
+- Fix regex parser for ops agent ingestion of slurm logs.
+- Add wait on placement group creation to avoid race condition during resume.
+
+## \[5.7.0\]
+
+- Expose `cloud_logging_filter` output from controller modules.
+- Add `partition_feature` for external dynamic nodes.
+- Add setup.py --slurmd-feature option for external dynamic node startup.
+- Installing signed nvidia drivers from repo added to ansible for Ubuntu 20.04
+  only. This allows using GPUs on shielded VMs.
+- Added legacy k80 support to ansible and made installing the latest nvidia the
+  default. A k80-compatible image based on the hpc-centos-7 image family will
+  now also be built.
+- Packer module refactored to build only a single image at a time.
+- Add HTC example terraform project.
+
+## \[5.6.3\]
+
+- Increase project metadata timeouts.
+- Add cluster cloud logging fiter output.
+- Add Ubuntu 22.04 LTS support.
+- Add preliminary ARM64 image support for T2A instances.
+- Add Debian 11 support.
+- Add Rocky Linux 8 support.
+- Adjust logging for config not found.
+
+## \[5.6.2\]
+
+- Fix Terraform 1.2 incompatibility introduced in 5.6.1.
+
+## \[5.6.1\]
+
+- Fix Terraform 1.4.0 incompatibilities.
+- `setup.log` now discoverable in GCP Cloud Logger.
+- Job `admin_comment` contains last allocated node failure.
+- Resume failures now notify srun of the error.
+- startup-script - Add logging level prefixes for parsing.
+- Fix slurm and slurm-gcp logs not showing up in Cloud Logging.
+- resume.py - No longer validate machine_type with placement groups.
+- Raise error from incorrect settings with dependant inputs.
+- For gcsfuse network storage, server_ip can be null/None or "".
+- Fix munge mount export from controller.
+- Enable DebugFlags=Power by default
+- Make slurmsync check preemptible status from instance rather than the
+  template.
 
 ## \[5.6.0\]
 

@@ -138,11 +138,6 @@ EOD
   }))
 
   validation {
-    condition     = length(var.partition_nodes) > 0
-    error_message = "Partition must contain nodes."
-  }
-
-  validation {
     condition = alltrue([
       for x in var.partition_nodes : can(regex("^[a-z](?:[a-z0-9]{0,5})$", x.group_name))
     ])
@@ -232,9 +227,7 @@ EOD
   default     = "ANY_SINGLE_ZONE"
   validation {
     condition     = contains(["ANY", "ANY_SINGLE_ZONE", "BALANCED"], var.zone_target_shape)
-    error_message = <<-EOD
-      Allowed values for zone_target_shape are "ANY", "ANY_SINGLE_ZONE", or "BALANCED".
-      EOD
+    error_message = "Allowed values for zone_target_shape are \"ANY\", \"ANY_SINGLE_ZONE\", or \"BALANCED\"."
   }
 }
 
@@ -275,8 +268,6 @@ EOD
 variable "enable_job_exclusive" {
   description = <<EOD
 Enables job exclusivity. A job will run exclusively on the scheduled nodes.
-
-If `enable_placement_groups=true`, then `enable_job_exclusive=true` will be forced.
 EOD
   type        = bool
   default     = false
@@ -285,13 +276,6 @@ EOD
 variable "enable_placement_groups" {
   description = <<EOD
 Enables job placement groups. Instances will be colocated for a job.
-
-If `enable_placement_groups=true`, then `enable_job_exclusive=true` will be forced.
-
-`enable_placement_groups=false` will be forced when all are not satisfied:
-- only compute optimized `machine_type` (C2 or C2D family).
-  - See https://cloud.google.com/compute/docs/machine-types
-- `node_count_static` == 0
 EOD
   type        = bool
   default     = false
@@ -329,4 +313,13 @@ EOD
     mount_options = string
   }))
   default = []
+}
+
+variable "partition_feature" {
+  description = <<-EOD
+    Any nodes with these features will be automatically put into this partition.
+    NOTE: meant to be used for external dynamic nodes that register.
+  EOD
+  type        = string
+  default     = null
 }
