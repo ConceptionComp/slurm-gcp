@@ -53,6 +53,7 @@ source "googlecompute" "image" {
   ssh_clear_authorized_keys = true
   use_iap                   = var.use_iap
   use_os_login              = var.use_os_login
+  temporary_key_pair_type   = "ed25519"
 
   ### network ###
   network_project_id = var.network_project_id
