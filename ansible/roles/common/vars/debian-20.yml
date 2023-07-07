@@ -34,7 +34,6 @@ common_packages:
 - jq
 - libbz2-dev
 - liblzma-dev
-- libcurl4-openssl-dev
 - libssl-dev
 - libxt-dev
 - libtool
