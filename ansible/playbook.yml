@@ -62,33 +62,33 @@
   - motd
   - common
   - kernel
-  - selinux
-  - role: cuda
-    vars:
-      gpu: true
-      cuda_bash_profile: true
-      cuda_restart_node_on_install: false
-      cuda_init_restart_service: false
-      cuda_use_runfile: true
-      cuda_runfile_disable_nvidia_drm: true
-      cuda_runfile_url: https://developer.download.nvidia.com/compute/cuda/11.4.4/local_installers/cuda_11.4.4_470.82.01_linux.run
-    when: install_cuda
-  - nfs
-  - cgroups
-  - munge
-  - mariadb
-  - libjwt
-  - lmod
-  - slurm
-  - slurmeventd
-  - role: ompi
-    when: install_ompi
-  - role: lustre
-    when: install_lustre
-  - role: gcsfuse
-    when: install_gcsfuse
-  - cloudagents
-  - logrotate
+  # - selinux
+  # - role: cuda
+  #   vars:
+  #     gpu: true
+  #     cuda_bash_profile: true
+  #     cuda_restart_node_on_install: false
+  #     cuda_init_restart_service: false
+  #     cuda_use_runfile: true
+  #     cuda_runfile_disable_nvidia_drm: true
+  #     cuda_runfile_url: https://developer.download.nvidia.com/compute/cuda/11.4.4/local_installers/cuda_11.4.4_470.82.01_linux.run
+  #   when: install_cuda
+  # - nfs
+  # - cgroups
+  # - munge
+  # - mariadb
+  # - libjwt
+  # - lmod
+  # - slurm
+  # - slurmeventd
+  # - role: ompi
+  #   when: install_ompi
+  # - role: lustre
+  #   when: install_lustre
+  # - role: gcsfuse
+  #   when: install_gcsfuse
+  # - cloudagents
+  # - logrotate
   - python
   - r
   - conception

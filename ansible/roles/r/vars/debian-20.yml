@@ -1,12 +1,12 @@
 r_packages:
-- r-base=4.2.3-1.2004.0
-- r-base-core=4.2.3-1.2004.0
-- r-base-dev=4.2.3-1.2004.0
-- r-recommended=4.2.3-1.2004.0
-- r-cran-mgcv
-- r-cran-rpart
-- r-cran-survival
-- r-cran-matrix=1.5-1-1.2004.0
+# - r-base=4.2.3-1.2004.0
+# - r-base-core=4.2.3-1.2004.0
+# - r-base-dev=4.2.3-1.2004.0
+# - r-recommended=4.2.3-1.2004.0
+# - r-cran-mgcv
+# - r-cran-rpart
+# - r-cran-survival
+# - r-cran-matrix=1.5-1-1.2004.0
 # - r-bioc-biocgenerics
 # - r-bioc-delayedarray
 # - r-bioc-limma
