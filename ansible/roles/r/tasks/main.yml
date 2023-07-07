@@ -27,7 +27,7 @@
 - name: Install R
   shell:
     chdir: "/tmp/R-{{ r_version }}"
-    cmd: "{{ command }}"
+    cmd: "{{ item }}"
   loop:
   - ./configure --enable-R-shlib --enable-memory-profiling --with-blas --with-lapack
   - make
