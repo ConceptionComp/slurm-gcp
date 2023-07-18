@@ -36,3 +36,13 @@
 - name: Install Module apps
   include_tasks: modules.yml
   loop: "{{ apps }}"
+
+- name: Set default modules
+  template:
+    src: StdEnv.lua.j2
+    dest: '{{paths.modulefiles}}/StdEnv.lua'
+
+- name: Create Default profile
+  copy:
+    src: 'z01_StdEnv.sh'
+    dest: '/etc/profile.d/z01_StdEnv.sh'

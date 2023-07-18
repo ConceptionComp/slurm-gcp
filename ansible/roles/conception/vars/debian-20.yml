@@ -22,7 +22,6 @@ common_packages:
 - xvfb
 - bedtools
 - bowtie2
-- libcurl4-openssl-dev
 
 python_packages:
 - selenium

@@ -12,11 +12,6 @@ cd /opt/apps
 wget http://security.ubuntu.com/ubuntu/pool/main/o/openssl1.0/libssl1.0.0_1.0.2n-1ubuntu5_amd64.deb
 apt-get install ./libssl1.0.0_1.0.2n-1ubuntu5_amd64.deb
 
-# Install Parse
-# gcloud storage cp gs://conception-automation-misc/software/ParseBiosciences-Pipeline.1.0.2p.tar.gz .
-# tar -xzvf ParseBiosciences-Pipeline.1.0.2p.tar.gz
-# pip3 install /opt/apps/ParseBiosciences-Pipeline.1.0.2p/
-
 #CLEANUP
 cd /opt/apps
 rm -f *.gz
@@ -28,3 +23,5 @@ python2 get-pip.py
 rm get-pip.py
 
 pip3 install --upgrade requests
+
+pip3 install --index-url --upgrade https://us-central1-python.pkg.dev/conception-cluster/conception-python-library/simple conception-python-library
