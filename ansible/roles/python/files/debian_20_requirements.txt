@@ -8,3 +8,5 @@ more-executors~=2.0
 multiqc
 cutadapt
 sinto
+keyrings
+keyrings.google-artifactregistry-auth
