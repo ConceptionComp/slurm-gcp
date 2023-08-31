@@ -58,12 +58,7 @@ source "googlecompute" "image" {
   ### general ###
   project_id = var.project_id
   zone       = var.zone
-
-  ### ssh ###
-  ssh_clear_authorized_keys = true
-  use_iap                   = var.use_iap
-  use_os_login              = var.use_os_login
-  temporary_key_pair_type   = "ed25519"
+  
   source_image_project_id = [var.project_id, var.source_image_project_id]
   skip_create_image       = var.skip_create_image
 
