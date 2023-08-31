@@ -33,6 +33,7 @@ zone       = "us-central1-a"
 # ]
 
 source_image_project_id = "ubuntu-os-cloud"
+source_image_family = "ubuntu-2004-lts"
 
 
 # *NOT* intended for production use
