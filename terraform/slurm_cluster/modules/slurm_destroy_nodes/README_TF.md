@@ -27,8 +27,8 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_local"></a> [local](#provider\_local) | 2.3.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.2.1 |
+| <a name="provider_local"></a> [local](#provider\_local) | ~> 2.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
 
 ## Modules
 
@@ -47,6 +47,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_exclude_list"></a> [exclude\_list](#input\_exclude\_list) | Exclude destruction of these compute nodes, by instance name. | `list(string)` | `[]` | no |
+| <a name="input_project_id"></a> [project\_id](#input\_project\_id) | The project ID | `string` | n/a | yes |
 | <a name="input_slurm_cluster_name"></a> [slurm\_cluster\_name](#input\_slurm\_cluster\_name) | Destroy compute nodes labeled with this slurm\_cluster\_name. | `string` | n/a | yes |
 | <a name="input_target_list"></a> [target\_list](#input\_target\_list) | Target destruction of these compute nodes, by instance name. | `list(string)` | `[]` | no |
 | <a name="input_triggers"></a> [triggers](#input\_triggers) | Additional Terraform triggers. | `map(string)` | `{}` | no |

@@ -29,8 +29,16 @@ data "google_compute_network" "default" {
 resource "random_string" "slurm_cluster_name" {
   length  = 8
   upper   = false
-  number  = false
+  numeric = false
   special = false
+}
+
+module "slurm_files" {
+  source = "../../../modules/slurm_files"
+
+  bucket_name        = var.bucket_name
+  project_id         = var.project_id
+  slurm_cluster_name = local.slurm_cluster_name
 }
 
 module "slurm_controller_template" {
@@ -39,4 +47,5 @@ module "slurm_controller_template" {
   network            = data.google_compute_network.default.self_link
   project_id         = var.project_id
   slurm_cluster_name = local.slurm_cluster_name
+  slurm_bucket_path  = module.slurm_files.slurm_bucket_path
 }

@@ -104,6 +104,23 @@ variable "name_prefix" {
   default     = "default"
 }
 
+variable "bandwidth_tier" {
+  description = <<-EOD
+    Tier 1 bandwidth increases the maximum egress bandwidth for VMs.
+    Using the `virtio_enabled` setting will only enable VirtioNet and will not enable TIER_1.
+    Using the `tier_1_enabled` setting will enable both gVNIC and TIER_1 higher bandwidth networking.
+    Using the `gvnic_enabled` setting will only enable gVNIC and will not enable TIER_1.
+    Note that TIER_1 only works with specific machine families & shapes and must be using an image that supports gVNIC. See [official docs](https://cloud.google.com/compute/docs/networking/configure-vm-with-high-bandwidth-configuration) for more details.
+  EOD
+  type        = string
+  default     = "platform_default"
+
+  validation {
+    condition     = contains(["platform_default", "virtio_enabled", "gvnic_enabled", "tier_1_enabled"], var.bandwidth_tier)
+    error_message = "Allowed values for bandwidth_tier are 'platform_default', 'virtio_enabled', 'gvnic_enabled', or 'tier_1_enabled'."
+  }
+}
+
 ############
 # INSTANCE #
 ############
@@ -191,6 +208,29 @@ variable "preemptible" {
   type        = bool
   description = "Allow the instance to be preempted."
   default     = false
+}
+
+variable "spot" {
+  description = <<-EOD
+    Provision as a SPOT preemptible instance.
+    See https://cloud.google.com/compute/docs/instances/spot for more details.
+  EOD
+  type        = bool
+  default     = false
+}
+
+variable "termination_action" {
+  description = <<-EOD
+    Which action to take when Compute Engine preempts the VM. Value can be: 'STOP', 'DELETE'. The default value is 'STOP'.
+    See https://cloud.google.com/compute/docs/instances/spot for more details.
+  EOD
+  type        = string
+  default     = "STOP"
+
+  validation {
+    condition     = var.termination_action == null ? true : contains(["STOP", "DELETE"], var.termination_action)
+    error_message = "Allowed values are: 'STOP', 'DELETE'."
+  }
 }
 
 ############
@@ -299,4 +339,9 @@ variable "disable_smt" {
   type        = bool
   description = "Disables Simultaneous Multi-Threading (SMT) on instance."
   default     = false
+}
+
+variable "slurm_bucket_path" {
+  description = "GCS Bucket URI of Slurm cluster file storage."
+  type        = string
 }

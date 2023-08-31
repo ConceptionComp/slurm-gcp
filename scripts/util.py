@@ -14,12 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import httplib2
+import argparse
+import collections
 import importlib.util
 import inspect
 import json
 import logging
 import logging.config
+import math
 import os
 import re
 import shelve
@@ -42,12 +44,21 @@ required_modules = [
     ("requests", "requests"),
     ("yaml", "yaml"),
     ("addict", "addict"),
+    ("httplib2", "httplib2"),
+    ("google.cloud.tpu_v2", "google-cloud-tpu"),
 ]
 missing_imports = False
+can_tpu = True
 for module, name in required_modules:
     if importlib.util.find_spec(module) is None:
-        missing_imports = True
-        print(f"ERROR: Missing Python module '{module} (pip:{name})'")
+        if module == "google.cloud.tpu_v2":
+            can_tpu = False
+            print(
+                f"WARNING: Missing Python module '{module} (pip:{name})', TPU support will not work."
+            )
+        else:
+            missing_imports = True
+            print(f"ERROR: Missing Python module '{module} (pip:{name})'")
 if missing_imports:
     print("Aborting due to missing Python modules")
     exit(1)
@@ -57,6 +68,11 @@ from google.oauth2 import service_account  # noqa: E402
 import googleapiclient.discovery  # noqa: E402
 import google_auth_httplib2  # noqa: E402
 from googleapiclient.http import set_user_agent  # noqa: E402
+import httplib2  # noqa: E402
+
+if can_tpu:
+    from google.cloud import tpu_v2 as tpu  # noqa: E402
+import google.api_core.exceptions as gExceptions  # noqa: E402
 
 from requests import get as get_url  # noqa: E402
 from requests.exceptions import RequestException  # noqa: E402
@@ -65,7 +81,6 @@ import yaml  # noqa: E402
 from addict import Dict as NSDict  # noqa: E402
 
 optional_modules = [
-    ("google.cloud.pubsub", "google-cloud-pubsub"),
     ("google.cloud.secretmanager", "google-cloud-secret-manager"),
 ]
 for module, name in optional_modules:
@@ -128,6 +143,11 @@ slurmdirs = NSDict(
 )
 
 
+yaml.SafeDumper.yaml_representers[
+    None
+] = lambda self, data: yaml.representer.SafeRepresenter.represent_str(self, str(data))
+
+
 class LogFormatter(logging.Formatter):
     """adds logging flags to the levelname in log records"""
 
@@ -173,41 +193,10 @@ logging_flags = [
     "trace_api",
     "subproc",
     "hostlists",
-    "subscriptions",
 ]
 log_trace_api = FlagLogAdapter(log, "trace_api")
 log_subproc = FlagLogAdapter(log, "subproc")
 log_hostlists = FlagLogAdapter(log, "hostlists")
-log_subscriptions = FlagLogAdapter(log, "subscriptions")
-
-
-def publish_message(project_id, topic_id, message) -> None:
-    """Publishes message to a Pub/Sub topic."""
-    from google.cloud import pubsub_v1
-    from google import api_core
-
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(project_id, topic_id)
-
-    retry_handler = api_core.retry.Retry(
-        predicate=api_core.retry.if_exception_type(
-            api_core.exceptions.Aborted,
-            api_core.exceptions.DeadlineExceeded,
-            api_core.exceptions.InternalServerError,
-            api_core.exceptions.ResourceExhausted,
-            api_core.exceptions.ServiceUnavailable,
-            api_core.exceptions.Unknown,
-            api_core.exceptions.Cancelled,
-        ),
-    )
-
-    message_bytes = message.encode("utf-8")
-    future = publisher.publish(topic_path, message_bytes, retry=retry_handler)
-    result = future.exception()
-    if result is not None:
-        raise result
-
-    print(f"Published message to '{topic_path}'.")
 
 
 def access_secret_version(project_id, secret_id, version_id="latest"):
@@ -241,6 +230,16 @@ def parse_self_link(self_link: str):
     return NSDict(link_patt.findall(self_link))
 
 
+def parse_bucket_uri(uri: str):
+    """
+    Parse a bucket url
+    E.g. gs://<bucket_name>/<path>
+    """
+    pattern = re.compile(r"gs://(?P<bucket>[^/\s]+)/(?P<path>([^/\s]+)(/[^/\s]+)*)")
+    matches = pattern.match(uri)
+    return matches.group("bucket"), matches.group("path")
+
+
 def trim_self_link(link: str):
     """get resource name from self link url, eg.
     https://.../v1/projects/<project>/regions/<region>
@@ -250,96 +249,6 @@ def trim_self_link(link: str):
         return link[link.rindex("/") + 1 :]
     except ValueError:
         raise Exception(f"'/' not found, not a self link: '{link}' ")
-
-
-def subscription_list(project_id=None, page_size=None, slurm_cluster_name=None):
-    """List pub/sub subscription"""
-    from google.cloud import pubsub_v1
-
-    if project_id is None:
-        project_id = auth_project
-    if slurm_cluster_name is None:
-        slurm_cluster_name = lkp.cfg.slurm_cluster_name
-
-    subscriber = pubsub_v1.SubscriberClient()
-
-    subscriptions = []
-    # get first page
-    page = subscriber.list_subscriptions(
-        request={
-            "project": f"projects/{project_id}",
-            "page_size": page_size,
-        }
-    )
-    subscriptions.extend(page.subscriptions)
-    # walk the pages
-    while page.next_page_token:
-        page = subscriber.list_subscriptions(
-            request={
-                "project": f"projects/{project_id}",
-                "page_token": page.next_page_token,
-                "page_size": page_size,
-            }
-        )
-        subscriptions.extend(page.subscriptions)
-    # manual filter by label
-    subscriptions = [
-        s
-        for s in subscriptions
-        if s.labels.get("slurm_cluster_name") == slurm_cluster_name
-    ]
-
-    return subscriptions
-
-
-def subscription_create(subscription_id, project_id=None):
-    """Create pub/sub subscription"""
-    from google.cloud import pubsub_v1
-    from google.api_core import exceptions
-
-    if project_id is None:
-        project_id = lkp.project
-    topic_id = lkp.cfg.pubsub_topic_id
-
-    publisher = pubsub_v1.PublisherClient()
-    subscriber = pubsub_v1.SubscriberClient()
-    topic_path = publisher.topic_path(project_id, topic_id)
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-
-    with subscriber:
-        request = {
-            "name": subscription_path,
-            "topic": topic_path,
-            "ack_deadline_seconds": 60,
-            "labels": {
-                "slurm_cluster_name": cfg.slurm_cluster_name,
-            },
-        }
-        try:
-            subscription = subscriber.create_subscription(request=request)
-            log.info(f"Subscription created: {subscription_path}")
-            log_subscriptions.debug(f"{subscription}")
-        except exceptions.AlreadyExists:
-            log.info(f"Subscription '{subscription_path}' already exists!")
-
-
-def subscription_delete(subscription_id, project_id=None):
-    """Delete pub/sub subscription"""
-    from google.cloud import pubsub_v1
-    from google.api_core import exceptions
-
-    if project_id is None:
-        project_id = lkp.project
-
-    subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-
-    with subscriber:
-        try:
-            subscriber.delete_subscription(request={"subscription": subscription_path})
-            log.info(f"Subscription deleted: {subscription_path}.")
-        except exceptions.NotFound:
-            log.info(f"Subscription '{subscription_path}' not found!")
 
 
 def execute_with_futures(func, seq):
@@ -361,14 +270,41 @@ def map_with_futures(func, seq):
             future = exe.submit(func, i)
             futures.append(future)
         for future in futures:
-            yield future.result(), future.exception()
+            # Will be result or raise Exception
+            res = None
+            try:
+                res = future.result()
+            except Exception as e:
+                res = e
+            yield res
 
 
-def is_exclusive_node(node):
-    partition = lkp.node_partition(node)
-    return not lkp.node_is_static(node) and (
-        partition.enable_job_exclusive or partition.enable_placement_groups
+def blob_get(file, project=None):
+    from google.cloud import storage
+
+    if project is None:
+        project = lkp.project
+    uri = instance_metadata("attributes/slurm_bucket_path")
+    bucket_name, path = parse_bucket_uri(uri)
+    blob_name = f"{path}/{file}"
+    storage_client = storage.Client(project=project)
+    return storage_client.get_bucket(bucket_name).blob(blob_name)
+
+
+def blob_list(prefix="", delimiter=None, project=None):
+    from google.cloud import storage
+
+    if project is None:
+        project = lkp.project
+    uri = instance_metadata("attributes/slurm_bucket_path")
+    bucket_name, path = parse_bucket_uri(uri)
+    blob_prefix = f"{path}/{prefix}"
+    storage_client = storage.Client(project=project)
+    # Note: The call returns a response only when the iterator is consumed.
+    blobs = storage_client.list_blobs(
+        bucket_name, prefix=blob_prefix, delimiter=delimiter
     )
+    return [blob for blob in blobs]
 
 
 def compute_service(credentials=None, user_agent=USER_AGENT, version="v1"):
@@ -451,30 +387,28 @@ def new_config(config):
         ),
     )
     for netstore in network_storage_iter:
-        if netstore.server_ip is None or netstore.server_ip == "$controller":
+        if netstore != "gcsfuse" and (
+            netstore.server_ip is None or netstore.server_ip == "$controller"
+        ):
             netstore.server_ip = cfg.slurm_control_host
     return cfg
 
 
-def config_from_metadata():
-    # get setup config from metadata
-    slurm_cluster_name = instance_metadata("attributes/slurm_cluster_name")
-    if not slurm_cluster_name:
-        return NSDict()
-
-    metadata_key = f"{slurm_cluster_name}-slurm-config"
-    for retry, wait in enumerate(backoff_delay(0.25, count=4, timeout=12)):
-        config_yaml = project_metadata.__wrapped__(metadata_key)
-        if config_yaml is None:
-            log.warning(f"config not found in project metadata, retry {retry}")
-            sleep(wait)
-            continue
-        else:
-            break
-    else:
-        config_yaml = instance_metadata("attributes/slurm-config")
-    cfg = new_config(yaml.safe_load(config_yaml or ""))
+def fetch_config_yaml():
+    """Fetch config.yaml from bucket"""
+    config_yaml = blob_get("config.yaml").download_as_text()
+    cfg = new_config(yaml.safe_load(config_yaml))
     return cfg
+
+
+def fetch_config_yaml_md5():
+    """Fetch config.yaml blob md5 from bucket"""
+    import hashlib
+
+    blob = blob_get("config.yaml")
+    blob.reload()  # Populate blob with metadata
+    hash_str = str(blob.md5_hash).encode(encoding="utf-8")
+    return hashlib.md5(hash_str)
 
 
 def load_config_file(path):
@@ -717,10 +651,10 @@ def find_ratio(a, n, s, r0=None):
         rn = r**n
         return (a * (rn * (n * rm1 - r) + r)) / (r * rm1**2)
 
-    MIN_DR = 0.001  # negligible change
+    MIN_DR = 0.0001  # negligible change
     r = r0
     # print(f"r(0)={r0}")
-    MAX_TRIES = 32
+    MAX_TRIES = 64
     for i in range(1, MAX_TRIES + 1):
         try:
             dr = f(r) / df(r)
@@ -738,7 +672,7 @@ def find_ratio(a, n, s, r0=None):
     return r
 
 
-def backoff_delay(start, count: int, timeout=None, ratio=None):
+def backoff_delay(start, timeout=None, ratio=None, count: int = 0):
     """generates `count` waits starting at `start`
     sum of waits is `timeout` or each one is `ratio` bigger than the last
     the last wait is always 0"""
@@ -746,8 +680,17 @@ def backoff_delay(start, count: int, timeout=None, ratio=None):
     assert (timeout is None) ^ (ratio is None)
     assert ratio is None or ratio > 0
     assert timeout is None or timeout >= start
-    assert count > 1 and isinstance(count, int)
+    assert (count > 1 or timeout is not None) and isinstance(count, int)
     assert start > 0
+
+    if count == 0:
+        # Equation for auto-count is tuned to have a max of
+        # ~int(timeout) counts with a start wait of <0.01.
+        # Increasing start wait decreases count eg.
+        # backoff_delay(10, timeout=60) -> count = 5
+        count = int(
+            (timeout / ((start + 0.05) ** (1 / 2)) + 2) // math.log(timeout + 2)
+        )
 
     yield start
     # if ratio is set:
@@ -776,8 +719,8 @@ def get_metadata(path, root=ROOT_URL):
         resp.raise_for_status()
         return resp.text
     except RequestException:
-        log.error(f"Error while getting metadata from {url}")
-        return None
+        log.debug(f"metadata not found ({url})")
+        raise Exception(f"failed to get_metadata from {url}")
 
 
 @lru_cache(maxsize=None)
@@ -790,6 +733,20 @@ def instance_metadata(path):
 def project_metadata(key):
     """Get project metadata project/attributes/<slurm_cluster_name>-<path>"""
     return get_metadata(key, root=f"{ROOT_URL}/project/attributes")
+
+
+def bucket_blob_download(bucket_name, blob_name):
+    from google.cloud import storage
+
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    contents = None
+    with tempfile.NamedTemporaryFile(mode="w+t") as tmp:
+        blob.download_to_filename(tmp.name)
+        with open(tmp.name, "r") as f:
+            contents = f.read()
+    return contents
 
 
 def natural_sort(text):
@@ -810,6 +767,24 @@ def to_hostlist(nodenames):
     log_hostlists.debug(f"hostlist({len(nodenames)}): {hostlist}".format(hostlist))
     os.remove(tmp_file.name)
     return hostlist
+
+
+def part_is_tpu(part):
+    """check if partition with name part contains a nodeset of type tpu"""
+    return len(lkp.cfg.partitions[part].partition_nodeset_tpu) > 0
+
+
+def get_vmcount_of_tpu_part(part):
+    res = 0
+    for ns in lkp.cfg.partitions[part].partition_nodeset_tpu:
+        tpu_obj = TPU(lkp.cfg.nodeset_tpu[ns])
+        if res == 0:
+            res = tpu_obj.vmcount
+        else:
+            if res != tpu_obj.vmcount:
+                # this should not happen, that in the same partition there are different vmcount nodesets
+                return -1
+    return res
 
 
 def to_hostnames(nodelist):
@@ -835,7 +810,7 @@ def retry_exception(exc):
 def ensure_execute(request):
     """Handle rate limits and socket time outs"""
 
-    for retry, wait in enumerate(backoff_delay(0.5, count=20, timeout=10 * 60)):
+    for retry, wait in enumerate(backoff_delay(0.5, timeout=10 * 60, count=20)):
         try:
             return request.execute()
         except googleapiclient.errors.HttpError as e:
@@ -941,6 +916,8 @@ def wait_request(operation, project=None, compute=compute):
 
 def wait_for_operation(operation, project=None, compute=compute):
     """wait for given operation"""
+    if project is None:
+        project = parse_self_link(operation["selfLink"]).project
     wait_req = wait_request(operation, project=project, compute=compute)
 
     while True:
@@ -1035,6 +1012,56 @@ def get_insert_operations(group_ids, flt=None, project=None, compute=compute):
     return get_filtered_operations(" AND ".join(f"({f})" for f in filters if f))
 
 
+def machine_type_sockets(template):
+    pattern = re.compile("^(?P<family>[^-]+)")
+    m = pattern.match(template.machineType)
+    if not m:
+        raise Exception(f"template {template} does not match expected regex")
+    family = m.group("family")
+    guestCpus: int = int(template.machine_info.guestCpus)
+    socket_count = dict.get(
+        {
+            "h3": 2,
+            "c2d": 2 if guestCpus > 56 else 1,
+        },
+        family,
+        1,  # assume 1 socket for all other families
+    )
+    return socket_count
+
+
+def isSmt(template):
+    machineType: str = template.machineType
+    guestCpus: int = int(template.machine_info.guestCpus)
+
+    pattern = re.compile("^(?P<family>[^-]+)")
+    matches = pattern.match(machineType)
+    machineTypeFamily: str = matches["family"]
+
+    # https://cloud.google.com/compute/docs/cpu-platforms
+    noSmtFamily = [
+        "t2a",
+        "t2d",
+        "h3",
+    ]
+    if machineTypeFamily in noSmtFamily:
+        return False
+    elif guestCpus == 1:
+        return False
+    return True
+
+
+def getThreadsPerCore(template):
+    threadsPerCore: int = template.advancedMachineFeatures.threadsPerCore
+
+    if not isSmt(template):
+        return 1
+    elif threadsPerCore:
+        return threadsPerCore
+    else:
+        return 2
+
+
 class Dumper(yaml.SafeDumper):
     """Add representers for pathlib.Path and NSDict for yaml serialization"""
 
@@ -1052,14 +1079,253 @@ class Dumper(yaml.SafeDumper):
         return dumper.represent_scalar("tag:yaml.org,2002:str", str(path))
 
 
+class TPU:
+    """Class for handling the TPU-vm nodes"""
+
+    if can_tpu:
+        State = tpu.types.cloud_tpu.Node.State
+        TPUS_PER_VM = 4
+        __expected_states = {
+            "create": State.READY,
+            "start": State.READY,
+            "stop": State.STOPPED,
+            "delete": State.TERMINATED,
+        }
+
+        __tpu_version_mapping = {
+            "V2": tpu.AcceleratorConfig().Type.V2,
+            "V3": tpu.AcceleratorConfig().Type.V3,
+            "V4": tpu.AcceleratorConfig().Type.V4,
+        }
+
+    def __init__(self, nodeset):
+        if not can_tpu:
+            raise Exception("TPU pip package not installed")
+        self._nodeset = nodeset
+        self._parent = f"projects/{lkp.project}/locations/{nodeset.zone}"
+        self._client = tpu.TpuClient()
+        self.data_disks = []
+        for data_disk in nodeset.data_disks:
+            ad = tpu.AttachedDisk()
+            ad.source_disk = data_disk
+            ad.mode = tpu.AttachedDisk.DiskMode.DISK_MODE_UNSPECIFIED
+            self.data_disks.append(ad)
+        ns_ac = nodeset.accelerator_config
+        if ns_ac.topology != "" and ns_ac.version != "":
+            ac = tpu.AcceleratorConfig()
+            ac.topology = ns_ac.topology
+            ac.type_ = self.__tpu_version_mapping[ns_ac.version]
+            self.ac = ac
+        else:
+            req = tpu.GetAcceleratorTypeRequest(
+                name=f"{self._parent}/acceleratorTypes/{nodeset.node_type}"
+            )
+            self.ac = self._client.get_accelerator_type(req).accelerator_configs[0]
+        self.vmcount = self.__calc_vm_from_topology(self.ac.topology)
+
+    @property
+    def nodeset(self):
+        return self._nodeset
+
+    @property
+    def preserve_tpu(self):
+        return self._nodeset.preserve_tpu
+
+    @property
+    def node_type(self):
+        return self._nodeset.node_type
+
+    @property
+    def tf_version(self):
+        return self._nodeset.tf_version
+
+    @property
+    def enable_public_ip(self):
+        return self._nodeset.enable_public_ip
+
+    @property
+    def preemptible(self):
+        return self._nodeset.preemptible
+
+    @property
+    def service_account(self):
+        return self._nodeset.service_account
+
+    @property
+    def zone(self):
+        return self._nodeset.zone
+
+    def check_node_type(self):
+        try:
+            request = tpu.GetAcceleratorTypeRequest(
+                name=f"{self._parent}/acceleratorTypes/{self.node_type}"
+            )
+            return self._client.get_accelerator_type(request=request) is not None
+        except Exception:
+            return False
+
+    def check_tf_version(self):
+        try:
+            request = tpu.GetRuntimeVersionRequest(
+                name=f"{self._parent}/runtimeVersions/{self.tf_version}"
+            )
+            return self._client.get_runtime_version(request=request) is not None
+        except Exception:
+            return False
+
+    def __calc_vm_from_topology(self, topology):
+        topo = topology.split("x")
+        tot = 1
+        for num in topo:
+            tot = tot * int(num)
+        return tot // self.TPUS_PER_VM
+
+    def __check_resp(self, response, op_name):
+        des_state = self.__expected_states.get(op_name)
+        # If the state is not in the table just print the response
+        if des_state is None:
+            return False
+        if response.state == des_state:
+            return True
+        return False
+
+    def list_nodes(self):
+        try:
+            request = tpu.ListNodesRequest(parent=self._parent)
+            res = self._client.list_nodes(request=request)
+        except gExceptions.NotFound:
+            res = None
+        return res
+
+    def list_node_names(self):
+        return [node.name.split("/")[-1] for node in self.list_nodes()]
+
+    def start_node(self, nodename):
+        request = tpu.StartNodeRequest(name=f"{self._parent}/nodes/{nodename}")
+        resp = self._client.start_node(request=request).result()
+        return self.__check_resp(resp, "start")
+
+    def stop_node(self, nodename):
+        request = tpu.StopNodeRequest(name=f"{self._parent}/nodes/{nodename}")
+        resp = self._client.stop_node(request=request).result()
+        return self.__check_resp(resp, "stop")
+
+    def get_node(self, nodename):
+        try:
+            request = tpu.GetNodeRequest(name=f"{self._parent}/nodes/{nodename}")
+            res = self._client.get_node(request=request)
+        except gExceptions.NotFound:
+            res = None
+        return res
+
+    def _register_node(self, nodename, ip_addr):
+        dns_name = socket.getnameinfo((ip_addr, 0), 0)[0]
+        run(
+            f"{lkp.scontrol} update nodename={nodename} nodeaddr={ip_addr} nodehostname={dns_name}"
+        )
+
+    def create_node(self, nodename):
+        if self.vmcount > 1 and not isinstance(nodename, list):
+            log.error(
+                f"Tried to create a {self.vmcount} node TPU on nodeset {self._nodeset.nodeset_name} but only received one nodename {nodename}"
+            )
+            return False
+        if self.vmcount > 1 and (
+            isinstance(nodename, list) and len(nodename) != self.vmcount
+        ):
+            log.error(
+                f"Expected to receive a list of {self.vmcount} nodenames for TPU node creation in nodeset {self._nodeset.nodeset_name}, but received this list {nodename}"
+            )
+            return False
+
+        node = tpu.Node()
+        node.accelerator_config = self.ac
+        node.runtime_version = f"tpu-vm-tf-{self.tf_version}"
+        startup_script = """
+        #!/bin/bash
+        echo "startup script not found > /var/log/startup_error.log"
+        """
+        with open(
+            Path(cfg.slurm_scripts_dir or dirs.scripts) / "startup.sh", "r"
+        ) as script:
+            startup_script = script.read()
+        if isinstance(nodename, list):
+            node_id = nodename[0]
+            slurm_names = []
+            wid = 0
+            for node_wid in nodename:
+                slurm_names.append(f"WORKER_{wid}:{node_wid}")
+                wid += 1
+        else:
+            node_id = nodename
+            slurm_names = [f"WORKER_0:{nodename}"]
+        node.metadata = {
+            "slurm_docker_image": self.nodeset.docker_image,
+            "startup-script": startup_script,
+            "slurm_instance_role": "compute",
+            "slurm_cluster_name": lkp.cfg.slurm_cluster_name,
+            "slurm_bucket_path": lkp.cfg.bucket_path,
+            "slurm_names": ";".join(slurm_names),
+        }
+        node.tags = [lkp.cfg.slurm_cluster_name]
+        if self.nodeset.service_account:
+            node.service_account.email = self.nodeset.service_account.email
+            node.service_account.scope = self.nodeset.service_account.scopes
+        node.scheduling_config.preemptible = self.preemptible
+        if self.nodeset.network:
+            node.network_config.network = self.nodeset.network
+        if self.nodeset.subnetwork:
+            node.network_config.subnetwork = self.nodeset.subnetwork
+        node.network_config.enable_external_ips = self.enable_public_ip
+        if self.data_disks:
+            node.data_disks = self.data_disks
+
+        request = tpu.CreateNodeRequest(parent=self._parent, node=node, node_id=node_id)
+        resp = self._client.create_node(request=request).result()
+        if not self.__check_resp(resp, "create"):
+            return False
+        if isinstance(nodename, list):
+            for node_id, net_endpoint in zip(nodename, resp.network_endpoints):
+                self._register_node(node_id, net_endpoint.ip_address)
+        else:
+            ip_add = resp.network_endpoints[0].ip_address
+            self._register_node(nodename, ip_add)
+        return True
+
+    def delete_node(self, nodename):
+        request = tpu.DeleteNodeRequest(name=f"{self._parent}/nodes/{nodename}")
+        try:
+            resp = self._client.delete_node(request=request).result()
+            if resp:
+                return self.__check_resp(resp, "delete")
+            return False
+        except gExceptions.NotFound:
+            # log only error if vmcount is 1 as for other tpu vm count, this could be "phantom" nodes
+            if self.vmcount == 1:
+                log.error(f"Tpu single node {nodename} not found")
+            else:
+                # for the TPU nodes that consist in more than one vm, only the first node of the TPU a.k.a. the master node will
+                # exist as real TPU nodes, so the other ones are expected to not be found, check the hostname of the node that has
+                # not been found, and if it ends in 0, it means that is the master node and it should have been found, and in consequence
+                # log an error
+                nodehostname = yaml.safe_load(
+                    run(f"{lkp.scontrol} --yaml show node {nodename}").stdout.rstrip()
+                )["nodes"][0]["hostname"]
+                if nodehostname.split("-")[-1] == "0":
+                    log.error(f"TPU master node {nodename} not found")
+                else:
+                    log.info(f"Deleted TPU 'phantom' node {nodename}")
+            # If the node is not found it is tecnichally deleted, so return success.
+            return True
+
+
 class Lookup:
     """Wrapper class for cached data access"""
 
     regex = (
         r"^(?P<prefix>"
-        r"(?P<name>[^\s\-]+)"
-        r"-(?P<partition>[^\s\-]+)"
-        r"-(?P<group>\S+)"
+        r"(?P<cluster>[^\s\-]+)"
+        r"-(?P<nodeset>\S+)"
         r")"
         r"-(?P<node>"
         r"(?P<index>\d+)|"
@@ -1125,6 +1391,15 @@ class Lookup:
         return instance_metadata("attributes/slurm_instance_role")
 
     @cached_property
+    def instance_role_safe(self):
+        try:
+            role = self.instance_role
+        except Exception as e:
+            log.error(e)
+            role = None
+        return role
+
+    @cached_property
     def compute(self):
         # TODO evaluate when we need to use google_app_cred_path
         if self.cfg.google_app_cred_path:
@@ -1160,40 +1435,49 @@ class Lookup:
     def node_prefix(self, node_name=None):
         return self._node_desc(node_name).prefix
 
-    def node_partition_name(self, node_name=None):
-        return self._node_desc(node_name).partition
+    def node_cluster_name(self, node_name=None):
+        return self._node_desc(node_name).cluster
 
-    def node_group_name(self, node_name=None):
-        return self._node_desc(node_name).group
+    def node_nodeset_name(self, node_name=None):
+        return self._node_desc(node_name).nodeset
 
     def node_index(self, node_name=None):
         return int(self._node_desc(node_name).index)
 
-    def node_partition(self, node_name=None):
-        return self.cfg.partitions[self.node_partition_name(node_name)]
+    def node_nodeset(self, node_name=None):
+        nodeset_name = self.node_nodeset_name(node_name)
+        ns = self.cfg.nodeset.get(nodeset_name)
+        if ns:
+            return ns
+        return self.cfg.nodeset_tpu.get(nodeset_name)
 
-    def node_group(self, node_name=None):
-        group_name = self.node_group_name(node_name)
-        return self.node_partition(node_name).partition_nodes[group_name]
+    def node_is_tpu(self, node_name=None):
+        nodeset_name = self.node_nodeset_name(node_name)
+        return self.cfg.nodeset_tpu.get(nodeset_name) is not None
+
+    def chunk_tpu_nodes(self, tpu_nodes):
+        model = tpu_nodes[0]
+        tpu = TPU(self.node_nodeset(model))
+        return chunked(tpu_nodes, n=tpu.vmcount)
 
     def node_template(self, node_name=None):
-        return self.node_group(node_name).instance_template
+        return self.node_nodeset(node_name).instance_template
 
     def node_template_info(self, node_name=None):
         return self.template_info(self.node_template(node_name))
 
     def node_region(self, node_name=None):
-        partition = self.node_partition(node_name)
-        return parse_self_link(partition.subnetwork).region
+        nodeset = self.node_nodeset(node_name)
+        return parse_self_link(nodeset.subnetwork).region
 
     def node_is_static(self, node_name=None):
-        node_group = self.node_group(node_name)
-        return self.node_index(node_name) < node_group.node_count_static
+        nodeset = self.node_nodeset(node_name)
+        return self.node_index(node_name) < nodeset.node_count_static
 
-    def nodeset_prefix(self, group_name, part_name):
-        return f"{self.cfg.slurm_cluster_name}-{part_name}-{group_name}"
+    def nodeset_prefix(self, nodeset_name):
+        return f"{self.cfg.slurm_cluster_name}-{nodeset_name}"
 
-    def nodeset_lists(self, node_group, part_name):
+    def nodeset_lists(self, nodeset):
         """Return static and dynamic nodenames given a partition node type
         definition
         """
@@ -1202,12 +1486,12 @@ class Lookup:
             end = start + count - 1
             return f"{start}" if count == 1 else f"[{start}-{end}]", end + 1
 
-        prefix = self.nodeset_prefix(node_group.group_name, part_name)
-        static_count = node_group.node_count_static
-        dynamic_count = node_group.node_count_dynamic_max
+        prefix = self.nodeset_prefix(nodeset.nodeset_name)
+        static_count = nodeset.node_count_static
+        dynamic_count = nodeset.node_count_dynamic_max
         static_range, end = node_range(static_count) if static_count else (None, 0)
         dynamic_range, _ = (
-            node_range(dynamic_count, end) if dynamic_count else (None, 0)
+            node_range(dynamic_count, start=end) if dynamic_count else (None, 0)
         )
 
         static_nodelist = f"{prefix}-{static_range}" if static_count else None
@@ -1216,16 +1500,11 @@ class Lookup:
 
     @lru_cache(maxsize=1)
     def static_nodelist(self):
-        return list(
-            filter(
-                None,
-                (
-                    self.nodeset_lists(node, part.partition_name)[0]
-                    for part in self.cfg.partitions.values()
-                    for node in part.partition_nodes.values()
-                ),
-            )
+        static_nodesets = (
+            self.nodeset_lists(ns)[0]
+            for ns in chain(self.cfg.nodeset.values(), self.cfg.nodeset_tpu.values())
         )
+        return [static for static in static_nodesets if static is not None]
 
     @lru_cache(maxsize=None)
     def slurm_nodes(self):
@@ -1249,7 +1528,7 @@ class Lookup:
         nodes = {
             node: state
             for node, state in map(make_node_tuple, node_lines)
-            if "CLOUD" in state.flags
+            if "CLOUD" in state.flags or "DYNAMIC_NORM" in state.flags
         }
         return nodes
 
@@ -1260,15 +1539,18 @@ class Lookup:
         static_nodes = []
         dynamic_nodes = []
 
-        for partition in lkp.cfg.partitions.values():
-            part_name = partition.partition_name
-            for node_group in partition.partition_nodes.values():
-                static, dynamic = self.nodeset_lists(node_group, part_name)
-                if static is not None:
-                    static_nodes.extend(to_hostnames(static))
-                if dynamic is not None:
-                    dynamic_nodes.extend(to_hostnames(dynamic))
-
+        for nodeset in self.cfg.nodeset.values():
+            static, dynamic = self.nodeset_lists(nodeset)
+            if static is not None:
+                static_nodes.extend(to_hostnames(static))
+            if dynamic is not None:
+                dynamic_nodes.extend(to_hostnames(dynamic))
+        for nodeset in self.cfg.nodeset_tpu.values():
+            static, dynamic = self.nodeset_lists(nodeset)
+            if static is not None:
+                static_nodes.extend(to_hostnames(static))
+            if dynamic is not None:
+                dynamic_nodes.extend(to_hostnames(dynamic))
         return static_nodes, dynamic_nodes
 
     def filter_nodes(self, nodes):
@@ -1282,6 +1564,13 @@ class Lookup:
         local_nodes = list(set(nodes).difference(all_cloud_nodes))
 
         return cloud_nodes, local_nodes
+
+    def tpu_instances(self):
+        res = []
+        for ns in self.cfg.nodeset_tpu:
+            tpuobj = TPU(ns)
+            res.extend(tpuobj.list_node_names())
+        return res
 
     @lru_cache(maxsize=1)
     def instances(self, project=None, slurm_cluster_name=None):
@@ -1379,13 +1668,6 @@ class Lookup:
         info = ensure_execute(op)
         return NSDict(info)
 
-    def subscription(self, instance_name, project=None, slurm_cluster_name=None):
-        subscriptions = self.subscriptions(
-            project=project, slurm_cluster_name=slurm_cluster_name
-        )
-        subscriptions = [parse_self_link(s.name).subscription for s in subscriptions]
-        return instance_name in subscriptions
-
     @lru_cache(maxsize=1)
     def machine_types(self, project=None):
         project = project or self.project
@@ -1438,7 +1720,6 @@ class Lookup:
         return NSDict(machine_info)
 
     def template_machine_conf(self, template_link, project=None, zone=None):
-
         template = self.template_info(template_link)
         if not template.machineType:
             temp_name = trim_self_link(template_link)
@@ -1448,13 +1729,12 @@ class Lookup:
 
         machine_conf = NSDict()
         machine_conf.boards = 1  # No information, assume 1
-        machine_conf.sockets = 1  # No information, assume 1
-        # Each physical core is assumed to have two threads unless disabled or incapable
-        _threads = template.advancedMachineFeatures.threadsPerCore
-        _threads_per_core = _threads if _threads else 2
-        _threads_per_core_div = 2 if _threads_per_core == 1 else 1
+        machine_conf.sockets = machine_type_sockets(template)
         machine_conf.threads_per_core = 1
-        machine_conf.cpus = int(machine.guestCpus / _threads_per_core_div)
+        _div = 2 if getThreadsPerCore(template) == 1 else 1
+        machine_conf.cpus = (
+            int(machine.guestCpus / _div) if isSmt(template) else machine.guestCpus
+        )
         machine_conf.cores_per_socket = int(machine_conf.cpus / machine_conf.sockets)
         # Because the actual memory on the host will be different than
         # what is configured (e.g. kernel will take it). From
@@ -1468,7 +1748,7 @@ class Lookup:
     def template_cache(self, writeback=False):
         flag = "c" if writeback else "r"
         err = None
-        for wait in backoff_delay(0.125, count=20, timeout=60):
+        for wait in backoff_delay(0.125, timeout=60, count=20):
             try:
                 cache = shelve.open(
                     str(self.template_cache_path), flag=flag, writeback=writeback
@@ -1489,7 +1769,6 @@ class Lookup:
 
     @lru_cache(maxsize=None)
     def template_info(self, template_link, project=None):
-
         project = project or self.project
         template_name = trim_self_link(template_link)
         # split read and write access to minimize write-lock. This might be a
@@ -1512,7 +1791,11 @@ class Lookup:
         # del template.metadata
 
         # translate gpus into an easier-to-read format
-        if template.guestAccelerators:
+        machine_info = self.machine_type(template.machineType, project=project)
+        if machine_info.accelerators:
+            template.gpu_type = machine_info.accelerators[0].guestAcceleratorType
+            template.gpu_count = machine_info.accelerators[0].guestAcceleratorCount
+        elif template.guestAccelerators:
             template.gpu_type = template.guestAccelerators[0].acceleratorType
             template.gpu_count = template.guestAccelerators[0].acceleratorCount
         else:
@@ -1527,25 +1810,70 @@ class Lookup:
 
         return template
 
-    @lru_cache(maxsize=1)
-    def subscriptions(self, project=None, slurm_cluster_name=None):
-        return subscription_list(
-            project_id=project, slurm_cluster_name=slurm_cluster_name
-        )
-
     def clear_template_info_cache(self):
         with self.template_cache(writeback=True) as cache:
             cache.clear()
         self.template_info.cache_clear()
 
+    def nodeset_map(self, hostnames: list):
+        """Convert a list of nodes into a map of nodeset_name to hostnames"""
+        nodeset_map = collections.defaultdict(list)
+        for node in hostnames:
+            nodeset_map[self.node_nodeset_name(node)].append(node)
+        return nodeset_map
+
 
 # Define late globals
+lkp = Lookup()
 cfg = load_config_file(CONFIG_FILE)
 if not cfg:
-    cfg = config_from_metadata()
+    try:
+        cfg = fetch_config_yaml()
+    except Exception as e:
+        log.warning(f"config not found in bucket: {e}")
     if cfg:
         save_config(cfg, CONFIG_FILE)
-    else:
-        log.error("config metadata unavailable")
 
 lkp = Lookup(cfg)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--partitions",
+        "-p",
+        help="The partition(s) to retrieve the TPU vmcount value for.",
+    )
+    args = parser.parse_args()
+    if args.partitions:
+        # useful exit code
+        # partition does not exists in config.yaml, thus do not exist in slurm
+        PART_INVALID = -1
+        # in the same partition there are nodesets with different vmcounts
+        DIFF_VMCOUNTS_SAME_PART = -2
+        # partition is a list of partitions in which at least two of them have different vmcount
+        DIFF_PART_DIFFERENT_VMCOUNTS = -3
+        vmcounts = []
+        # valid equals to 0 means that we are ok, otherwise it will be set to one of the previously defined exit codes
+        valid = 0
+        for part in args.partitions.split(","):
+            if part not in lkp.cfg.partitions:
+                valid = PART_INVALID
+                break
+            else:
+                if part_is_tpu(part):
+                    vmcount = get_vmcount_of_tpu_part(part)
+                    if vmcount == -1:
+                        valid = DIFF_VMCOUNTS_SAME_PART
+                        break
+                    vmcounts.append(vmcount)
+                else:
+                    vmcounts.append(0)
+        # this means that there are different vmcounts for these partitions
+        if valid == 0 and len(set(vmcounts)) != 1:
+            valid = DIFF_PART_DIFFERENT_VMCOUNTS
+        if valid != 0:
+            print(f"VMCOUNT:{valid}")
+        else:
+            print(f"VMCOUNT:{vmcounts[0]}")

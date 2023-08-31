@@ -2,7 +2,150 @@
 
 All notable changes to this project will be documented in this file.
 
-## \[Next\]
+## \[6.1.2\]
+
+- Fix accelerator optimized machine type SMT handling.
+- Prefix user visible errors with its source.
+- Fix accelerator optimized machine type socket handling.
+- Only compare config.yaml blob to cache file.
+- Fix login nodes appearing as compute nodes in Slurm output.
+- Add enable_debug_logging and extra_logging_flags to terraform.
+- Only attempt static node resume when node is powered down.
+- Fix CUDA on Ubuntu by installing CUDA via runfile alongside NVIDIA driver from
+  signed repo.
+- Fix conf generation issue on reconfiguration.
+
+## \[6.1.1\]
+
+- Fix suspend issue with TPU nodes
+- Add TPU job example
+- Changed slurm dependency from man2html to man2html-base and man2html-core to
+  reduce image size
+- Changed default docker image name to remove the OS reference
+
+## \[6.1.0\]
+
+- Add on_host_maintenance to packer module to support instances with GPUs.
+- Fix retry of powering up static nodes on failure.
+- Add support for H3 machines and enumerated multi-socket processors.
+- Fix munge failing after manual reboot of node.
+- \[Beta feature\] Added support for TPU-vm nodes.
+- \[Beta feature\] Added support for TPU-vm multi-rank nodes.
+- Add `ignore_prefer_validation` to SchedulerParameters in generated cloud.conf.
+- Remove unaltered centos-7 image from actively published and supported images.
+- Upgrade installed Slurm to 23.02.4.
+- Fix CUDA install on Ubuntu 20.04.
+
+## \[6.0.0\]
+
+- Add slurm cluster management daemon
+- Update default Slurm version to 23.02.2.
+- Make `slurm_cluster` root module use terraform 1.3 and optional object fields.
+- Reconfigure now is a service on the instances.
+- Move from project metadata to GCS bucket to store cluster files.
+- Factored out nodeset modules (regular, dynamic) from partition module.
+- Replace `zone_policy_*` with `zones` in nodeset module.
+- Replace `access_config` with `enable_public_ip` and `network_tier`.
+- Add partition options `default`, `resume_timeout`, `suspend_time`,
+  `suspend_timeout`.
+- Increase `nodeset_name` length to 15 characters (from 7).
+- Remove `partition_name` length limit.
+- Add `bandwidth_tier` support to instance templates.
+- Move `spot` preemptible support to instance template.
+- Fix login template name not using `group_name` in name schema.
+- Add `enable_login` to toggle creation of login node resources.
+- Remove partition level startup-scripts and network mounts.
+- Fix Ubuntu 20.04 NVIDIA install.
+- Change partition level placement policy to nodeset level.
+- Use `topology.conf` to prioritize nodes within nodesets.
+- Remove debian-10 and vanilla rocky-linux-8 images from build process and
+  support.
+- Fix threads per core inference.
+- Upgrade Slurm to 23.02.3
+
+## \[5.7.4\]
+
+- Set EOL of published centos-7 image to Aug 2023. If you need this image for
+  longer, consider switching to hpc-centos-7, which will have support through
+  Jan 2024.
+- Allow metadata key `slurmd_feature` to initiate dynamic node setup.
+- Fix dynamic nodes using cloud_dns instead of cloud_reg_addrs.
+- Disable TreeWidth when dynamic nodes are configured.
+- Fix dynamic nodes failing to download custom scripts.
+- Fix slurmsync with only dynamic nodes in system.
+- Fix NVIDIA driver install after kernel upgrade for rocky-linux-8.
+
+## \[5.7.3\]
+
+- Fix detecting gpus on certain machine types.
+- Forward additional error information to node reason and salloc/srun.
+- Fix warning on missing python library httplib2.
+- Fix lustre support in images by installing the latest available client version
+  for each OS.
+- Change image name format to use Slurm-GCP version instead of the Slurm
+  version. eg. slurm-gcp-5-7-hpc-centos-7
+- Disable Lustre install for Debian 11 because it is currently incompatible. It
+  wasn't working anyway.
+
+## \[5.7.2\]
+
+- Fix DefMemPerCPU on partitions that only contain dynamic nodes.
+- Add hpc-rocky-linux-8 image build using
+  cloud-hpc-image-public/hpc-rocky-linux-8 as a base.
+- Update default slurm to 22.05.9
+
+## \[5.7.1\]
+
+- Fix regression in load_bq.py.
+- Fix slurmsync.py handling of pub/sub subscriptions when enable_reconfigure.
+- Add retries to munge mount to handle the case of attempted mount before the
+  controller is ready.
+- Fix partition generation with both nodes and feature.
+- Fix regex parser for ops agent ingestion of slurm logs.
+- Add wait on placement group creation to avoid race condition during resume.
+
+## \[5.7.0\]
+
+- Expose `cloud_logging_filter` output from controller modules.
+- Add `partition_feature` for external dynamic nodes.
+- Add setup.py --slurmd-feature option for external dynamic node startup.
+- Installing signed nvidia drivers from repo added to ansible for Ubuntu 20.04
+  only. This allows using GPUs on shielded VMs.
+- Added legacy k80 support to ansible and made installing the latest nvidia the
+  default. A k80-compatible image based on the hpc-centos-7 image family will
+  now also be built.
+- Packer module refactored to build only a single image at a time.
+- Add HTC example terraform project.
+
+## \[5.6.3\]
+
+- Increase project metadata timeouts.
+- Add cluster cloud logging fiter output.
+- Add Ubuntu 22.04 LTS support.
+- Add preliminary ARM64 image support for T2A instances.
+- Add Debian 11 support.
+- Add Rocky Linux 8 support.
+- Adjust logging for config not found.
+
+## \[5.6.2\]
+
+- Fix Terraform 1.2 incompatibility introduced in 5.6.1.
+
+## \[5.6.1\]
+
+- Fix Terraform 1.4.0 incompatibilities.
+- `setup.log` now discoverable in GCP Cloud Logger.
+- Job `admin_comment` contains last allocated node failure.
+- Resume failures now notify srun of the error.
+- startup-script - Add logging level prefixes for parsing.
+- Fix slurm and slurm-gcp logs not showing up in Cloud Logging.
+- resume.py - No longer validate machine_type with placement groups.
+- Raise error from incorrect settings with dependant inputs.
+- For gcsfuse network storage, server_ip can be null/None or "".
+- Fix munge mount export from controller.
+- Enable DebugFlags=Power by default
+- Make slurmsync check preemptible status from instance rather than the
+  template.
 
 ## \[5.6.0\]
 

@@ -19,17 +19,19 @@ output "slurm_cluster_name" {
   value       = var.slurm_cluster_name
 }
 
-output "partitions" {
-  description = "Cluster partitions."
-  value       = local.partitions
-}
-
-output "compute_list" {
-  description = "Cluster compute node list."
-  value       = local.compute_list
-}
-
 output "output_dir" {
   description = "Directory where configuration files are written to."
   value       = local.output_dir
+}
+
+##########
+# GOOGLE #
+##########
+
+output "cloud_logging_filter" {
+  description = "Cloud Logging filter to find startup errors."
+  value       = <<-EOT
+  resource.type="gce_instance"
+  logName=("projects/${var.project_id}/logs/slurm_resume" OR "projects/${var.project_id}/logs/slurm_suspend" OR "projects/${var.project_id}/logs/slurm_sync" OR "projects/${var.project_id}/logs/slurmctld" OR "projects/${var.project_id}/logs/slurmd" OR "projects/${var.project_id}/logs/slurmdbd") OR (logName=("projects/${var.project_id}/logs/syslog") AND jsonPayload.message=~"google_metadata_script_runner")
+  EOT
 }

@@ -16,14 +16,12 @@ stages:
 
 variables:
   GOOGLE_APPLICATION_CREDENTIALS: $CI_PROJECT_DIR/sa.json
-  SLURM_VERSION: 22.05.8
-  IMAGE_PREFIX: $CI_COMMIT_BRANCH
+  SLURM_VERSION: 23.02.4
+  BRANCH: $CI_COMMIT_BRANCH
 
 default:
   image:
-    name: registry.gitlab.com/schedmd/slurm-gcp/ci-image:0.0.4
-
-  retry: 2
+    name: registry.gitlab.com/schedmd/slurm-gcp/ci-image:0.0.7
 
   before_script:
   - set +o pipefail
@@ -33,15 +31,35 @@ default:
   - GCP_SA_EMAIL=$(jq -r .client_email < $GOOGLE_APPLICATION_CREDENTIALS)
   - GCP_SA_ID=$(jq -r .client_id < $GOOGLE_APPLICATION_CREDENTIALS)
 
+  - 'echo Slurm version to build: $SLURM_VERSION'
   - SLURM_VERSION_ALT=$(tr \. - <<< $SLURM_VERSION)
-  - IMAGE_FAMILY_ROOT=$IMAGE_PREFIX-v5-slurm-$SLURM_VERSION_ALT
+  - IMAGE_FAMILY_ROOT=slurm-gcp-$BRANCH
 
   - gcloud auth activate-service-account --key-file $GOOGLE_APPLICATION_CREDENTIALS
   - gcloud config set project $GCP_PROJECT_ID
-  - pip3 install pipenv
 
 .build-image:
   stage: build-images
+  retry: 2
+  artifacts:
+    name: image-manifest-$BRANCH-$IMAGE_OS
+    paths:
+    - packer/manifest.json
+  script:
+  - echo "Building $IMAGE_OS image for $BRANCH"
+  - cd packer
+  - packer init .
+  - >
+    packer build -var-file builds/$IMAGE_OS.hcl
+    -var "project_id=$GCP_PROJECT_ID"
+    -var "slurm_version=$SLURM_VERSION"
+    -var "slurmgcp_version=$BRANCH"
+    $EXTRA_VARS
+    .
+  - echo "packer build $IMAGE_OS completed"
+
+.build-core-image:
+  extends: .build-image
   rules:
   - changes:
       paths:
@@ -51,47 +69,76 @@ default:
       - scripts/requirements.txt
       - ansible/**/*
       - packer/**/*
-  artifacts:
-    name: image-manifest-$IMAGE_PREFIX-$IMAGE_OS
-    paths:
-    - packer/manifest.json
-  script:
-  - echo "Building $IMAGE_OS image for $IMAGE_PREFIX"
-  - cd packer
-  - packer init .
-  - >
-    packer build -var-file=example.pkrvars.hcl
-    -var "project_id=$GCP_PROJECT_ID"
-    -var "slurm_version=$SLURM_VERSION"
-    -var "prefix=$IMAGE_PREFIX"
-    -only "*.$IMAGE_OS"
-    .
-  - echo "packer build $IMAGE_OS completed"
 
-build-centos-7:
+# skip image build and test for all except a couple images on push
+# build and test all on manual/scheduled pipelines
+.build-extra-image:
   extends: .build-image
-  variables:
-    IMAGE_OS: centos-7
+  rules:
+  - if: $CI_PIPELINE_SOURCE == "push"
+    when: never
+  - if: $ONLY_CORE
+    when: never
+  - changes:
+      paths:
+      - .gitlab-ci.yml
+      - scripts/*.{py,sh}
+      - scripts/Pipfile
+      - scripts/requirements.txt
+      - ansible/**/*
+      - packer/**/*
 
 build-hpc-centos-7:
-  extends: .build-image
+  extends: .build-extra-image
   variables:
     IMAGE_OS: hpc-centos-7
 
-build-debian-10:
-  extends: .build-image
+build-hpc-centos-7-k80:
+  extends: .build-extra-image
   variables:
-    IMAGE_OS: debian-10
+    IMAGE_OS: hpc-centos-7-k80
+
+build-hpc-rocky-linux-8:
+  extends: .build-core-image
+  variables:
+    IMAGE_OS: hpc-rocky-linux-8
+
+build-debian-11:
+  extends: .build-extra-image
+  variables:
+    IMAGE_OS: debian-11
+
+# build-debian-11-arm64:
+#   extends: .build-extra-image
+#   variables:
+#     IMAGE_OS: debian-11-arm64
 
 build-ubuntu-2004-lts:
-  extends: .build-image
+  extends: .build-core-image
   variables:
     IMAGE_OS: ubuntu-2004-lts
 
+# build-ubuntu-2004-lts-arm64:
+#   extends: .build-extra-image
+#   variables:
+#     IMAGE_OS: ubuntu-2004-lts-arm64
+
+# build-ubuntu-2204-lts:
+#   extends: .build-extra-image
+#   variables:
+#     IMAGE_OS: ubuntu-2204-lts
+
+build-ubuntu-2204-lts-arm64:
+  extends: .build-extra-image
+  variables:
+    IMAGE_OS: ubuntu-2204-lts-arm64
+
 .test-image:
   stage: test-clusters
+  retry: 1
   artifacts:
     name: $CI_COMMIT_REF_NAME-$CI_JOB_NAME-logs
+    when: always
     paths:
     - test/cluster_logs/
   script:
@@ -106,42 +153,74 @@ build-ubuntu-2004-lts:
   - cd test
   - CLUSTER_NAME="test$(tr -dc a-z </dev/urandom | head -c2)"
   - echo $CLUSTER_NAME | tee cluster_name
-  - pipenv install
+  - export PATH=/venv/bin:$PATH
+  - pip3 install -r requirements.txt
   - >
-    pipenv run pytest -vs
+    pytest -vs
     --project-id=$GCP_PROJECT_ID
     --cluster-name=$CLUSTER_NAME
     --image-project=$GCP_PROJECT_ID
     --image-family=$IMAGE_FAMILY
     --image=${IMAGE_NAME:-null}
-  after_script:
-  - cd test
-  - pipenv install
-  - pipenv run ./cleanup.py $(cat cluster_name)
+    -m "${ARCH}"
+  # after_script:
+  # - cd test
+  # - pipenv install
+  # - pipenv run ./cleanup.py $(cat cluster_name)
 
-test-centos-7:
+.test-extra-image:
   extends: .test-image
-  needs:
-  - job: build-centos-7
-    optional: true
-  variables:
-    IMAGE_OS: centos-7
+  rules:
+  - if: $CI_PIPELINE_SOURCE == "push"
+    when: never
+  - if: $ONLY_CORE
+    when: never
+  - when: always
 
 test-hpc-centos-7:
-  extends: .test-image
+  extends: .test-extra-image
   needs:
   - job: build-hpc-centos-7
     optional: true
   variables:
     IMAGE_OS: hpc-centos-7
+    ARCH: x86_64
 
-test-debian-10:
-  extends: .test-image
+test-hpc-centos-7-k80:
+  extends: .test-extra-image
   needs:
-  - job: build-debian-10
+  - job: build-hpc-centos-7-k80
     optional: true
   variables:
-    IMAGE_OS: debian-10
+    IMAGE_OS: hpc-centos-7-k80
+    ARCH: x86_64
+
+test-hpc-rocky-linux-8:
+  extends: .test-image
+  needs:
+  - job: build-hpc-rocky-linux-8
+    optional: true
+  variables:
+    IMAGE_OS: hpc-rocky-linux-8
+    ARCH: x86_64
+
+test-debian-11:
+  extends: .test-extra-image
+  needs:
+  - job: build-debian-11
+    optional: true
+  variables:
+    IMAGE_OS: debian-11
+    ARCH: x86_64
+
+# test-debian-11-arm64:
+#   extends: .test-extra-image
+#   needs:
+#   - job: build-debian-11-arm64
+#     optional: true
+#   variables:
+#     IMAGE_OS: debian-11-arm64
+#     ARCH: arm64
 
 test-ubuntu-2004-lts:
   extends: .test-image
@@ -150,3 +229,31 @@ test-ubuntu-2004-lts:
     optional: true
   variables:
     IMAGE_OS: ubuntu-2004-lts
+    ARCH: x86_64
+
+# test-ubuntu-2004-lts-arm64:
+#   extends: .test-extra-image
+#   needs:
+#   - job: build-ubuntu-2004-lts-arm64
+#     optional: true
+#   variables:
+#     IMAGE_OS: ubuntu-2004-lts-arm64
+#     ARCH: arm64
+
+# test-ubuntu-2204-lts:
+#   extends: .test-extra-image
+#   needs:
+#   - job: build-ubuntu-2204-lts
+#     optional: true
+#   variables:
+#     IMAGE_OS: ubuntu-2204-lts
+#     ARCH: x86_64
+
+test-ubuntu-2204-lts-arm64:
+  extends: .test-extra-image
+  needs:
+  - job: build-ubuntu-2204-lts-arm64
+    optional: true
+  variables:
+    IMAGE_OS: ubuntu-2204-lts-arm64
+    ARCH: arm64

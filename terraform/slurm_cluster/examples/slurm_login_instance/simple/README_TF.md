@@ -27,13 +27,14 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 4.55.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.4.3 |
+| <a name="provider_google"></a> [google](#provider\_google) | >= 3.53, < 5.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_slurm_files"></a> [slurm\_files](#module\_slurm\_files) | ../../../modules/slurm_files | n/a |
 | <a name="module_slurm_login_instance"></a> [slurm\_login\_instance](#module\_slurm\_login\_instance) | ../../../modules/slurm_login_instance | n/a |
 | <a name="module_slurm_login_sa"></a> [slurm\_login\_sa](#module\_slurm\_login\_sa) | ../../../../slurm_sa_iam | n/a |
 | <a name="module_slurm_login_template"></a> [slurm\_login\_template](#module\_slurm\_login\_template) | ../../../modules/slurm_instance_template | n/a |
@@ -49,6 +50,7 @@ limitations under the License.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_bucket_name"></a> [bucket\_name](#input\_bucket\_name) | Name of GCS bucket to use. | `string` | n/a | yes |
 | <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Project ID to create resources in. | `string` | n/a | yes |
 | <a name="input_region"></a> [region](#input\_region) | The region to place resources. | `string` | n/a | yes |
 

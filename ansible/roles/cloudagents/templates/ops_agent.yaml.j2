@@ -14,12 +14,6 @@
 
 logging:
   receivers:
-    mysql_error:
-      type: mysql_error
-    mysql_general:
-      type: mysql_general
-    mysql_slow:
-      type: mysql_slow
     slurmdbd:
       type: files
       include_paths:
@@ -36,10 +30,6 @@ logging:
       type: files
       include_paths:
       - /var/log/slurm/slurmd-*.log
-    slurmeventd:
-      type: files
-      include_paths:
-      - /var/log/slurm/slurmeventd.log
     slurm_resume:
       type: files
       include_paths:
@@ -52,34 +42,25 @@ logging:
       type: files
       include_paths:
       - /var/log/slurm/slurmsync.log
-    syslog:
+    setup:
       type: files
       include_paths:
-      - /var/log/messages
-      - /var/log/syslog
+      - /slurm/scripts/setup.log
   processors:
     parse_slurmlog:
       type: parse_regex
       field: message
-      regex: "^\[(?<time>[^ ]*)\] (?<message>(?<severity>(fatal|error|verbose|debug[0-9]?):)?.*)$"
-      time_key: time
-      time_format: "%Y-%M-%dT%H:%M:%S.%L"
+      regex: "^\[(?<time>\S+)\] (?<message>((?<severity>(fatal|error|verbose|debug[0-9]?)):)?.*)$"
+      #time_key: time
+      #time_format: "%Y-%M-%dT%H:%M:%S.%L"
     parse_slurmlog2:
       type: parse_regex
       field: message
-      regex: "^(?<time>\S+ \S+) (?<severity>(CRITICAL|ERROR|WARNING|INFO|DEBUG))(\(\S+\))?: (?<message>.*)$"
-      time_key: time
-      time_format: "%Y-%M-%d %H:%M:%S,%L"
+      regex: "^(?<time>\S+ \S+) (?<message>(?<severity>(CRITICAL|ERROR|WARNING|INFO|DEBUG))(\(\S+\))?:.*)$"
+      #time_key: time
+      #time_format: "%Y-%M-%d %H:%M:%S,%L"
   service:
     pipelines:
-      default_pipeline:
-        receivers:
-        - syslog
-      mysql:
-        receivers:
-        - mysql_error
-        - mysql_general
-        - mysql_slow
       slurmlog_pipeline:
         receivers:
         - slurmdbd
@@ -90,24 +71,9 @@ logging:
         - parse_slurmlog
       slurmlog2_pipeline:
         receivers:
-        - slurmeventd
         - slurm_resume
         - slurm_suspend
         - slurm_sync
+        - setup
         processors:
         - parse_slurmlog2
-metrics:
-  receivers:
-    hostmetrics:
-      type: hostmetrics
-      collection_interval: 60s
-    mysql:
-      type: mysql
-  service:
-    pipelines:
-      default_pipeline:
-        receivers:
-        - hostmetrics
-      mysql:
-        receivers:
-        - mysql

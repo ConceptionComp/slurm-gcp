@@ -22,7 +22,6 @@
   - [Packer Project](#packer-project)
   - [Preemptible VM](#preemptible-vm)
   - [Private Google Access](#private-google-access)
-  - [Pub/Sub](#pubsub)
   - [Python](#python)
   - [Pip](#pip)
   - [GCP Quota](#gcp-quota)
@@ -40,6 +39,7 @@
   - [TerraformUser](#terraformuser)
   - [Terraform Project](#terraform-project)
   - [Terraform Registry](#terraform-registry)
+  - [TPU](#tpu)
   - [VM](#vm)
 
 <!-- mdformat-toc end -->
@@ -210,13 +210,6 @@ https://cloud.google.com/vpc/docs/configure-private-google-access
 > Private Google Access also allows access to the external IP addresses used by
 > App Engine, including third-party App Engine-based services.
 
-## Pub/Sub
-
-https://cloud.google.com/pubsub/docs/overview
-
-> Pub/Sub allows services to communicate asynchronously, with latencies on the
-> order of 100 milliseconds.
-
 ## Python
 
 https://www.python.org/
@@ -382,6 +375,21 @@ https://registry.terraform.io
 
 > Discover Terraform providers that power all of Terraform’s resource types, or
 > find modules for quickly deploying common infrastructure configurations.
+
+## TPU
+
+https://cloud.google.com/tpu
+
+> TPUs or Tensor Processing Units are machine learning accelerators optimized to
+> accelerate the training and inference of machine learning models, making them
+> ideal for a variety of applications, including natural language processing,
+> computer vision, and speech recognition. TPUs are specialized hardware that
+> accelerate ML workloads at scale. Features, such as the matrix multiply unit
+> (MXU) optimize large matrix operations, while optical circuit switch (OCS)
+> technology enables high-bandwidth memory (HBM). They can be connected into
+> groups called Pods that scale up and accelerate ML training and inference.
+> Cloud TPUs offer high performance, ease of development, and cost efficiency in
+> terms of ML development and productionization.
 
 ## VM
 

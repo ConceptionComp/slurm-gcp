@@ -27,10 +27,27 @@ locals {
   ansible_vars = {
     slurm_version   = var.slurm_version
     install_cuda    = var.install_cuda
+    nvidia_version  = var.nvidia_version
     install_ompi    = var.install_ompi
     install_lustre  = var.install_lustre
     install_gcsfuse = var.install_gcsfuse
   }
+
+  parse_version = regex("^(?P<major>\\d+)(?:\\.(?P<minor>\\d+))?(?:\\.(?P<patch>\\d+))?|(?P<branch>\\w+)$", var.slurmgcp_version)
+  branch        = local.parse_version["branch"] != null ? replace(local.parse_version["branch"], ".", "-") : null
+  version       = join("-", compact([local.parse_version["major"], local.parse_version["minor"], local.parse_version["patch"], local.branch]))
+
+  prefix_str  = try(length(var.prefix), 0) > 0 ? "${var.prefix}-" : ""
+  root_str    = "slurm-gcp-${local.version}"
+  variant_str = try(length(var.variant), 0) > 0 ? "-${var.variant}" : ""
+
+  # If image_family_alt is set, use it instead of source_image_family
+  image_os_name    = try(length(var.image_family_alt), 0) > 0 ? var.image_family_alt : var.source_image_family
+  generated_family = "${local.prefix_str}${local.root_str}-${local.image_os_name}${local.variant_str}"
+
+  # if image_family_name is set, use it for image_family instead of the generated one.
+  image_family = try(length(var.image_family_name), 0) > 0 ? var.image_family_name : local.generated_family
+
 }
 
 ##########
@@ -42,18 +59,13 @@ source "googlecompute" "image" {
   project_id = var.project_id
   zone       = var.zone
 
-  ### image ###
-  source_image_project_id = setunion(
-    [var.project_id],
-    var.source_image_project_id,
-  )
-  skip_create_image = var.skip_create_image
-
   ### ssh ###
   ssh_clear_authorized_keys = true
   use_iap                   = var.use_iap
   use_os_login              = var.use_os_login
   temporary_key_pair_type   = "ed25519"
+  source_image_project_id = [var.project_id, var.source_image_project_id]
+  skip_create_image       = var.skip_create_image
 
   ### network ###
   network_project_id = var.network_project_id
@@ -64,12 +76,48 @@ source "googlecompute" "image" {
   service_account_email = var.service_account_email
   scopes                = var.service_account_scopes
 
-  state_timeout = "10m"
+  ### image ###
+  source_image        = var.source_image
+  source_image_family = var.source_image_family
+
+  image_name        = "${local.image_family}-{{timestamp}}"
+  image_family      = local.image_family
+  image_description = "slurm-gcp-v5"
+  image_licenses    = var.image_licenses
+  image_labels      = var.labels
+
+  ### ssh ###
+  ssh_username              = var.ssh_username
+  ssh_password              = var.ssh_password
+  ssh_clear_authorized_keys = true
+  use_iap                   = var.use_iap
+  use_os_login              = var.use_os_login
+  temporary_key_pair_type   = "ed25519"
+  #temporary_key_pair_bits   = 0
+
+  ### instance ###
+  instance_name = "${local.image_family}-{{timestamp}}"
+  machine_type  = var.machine_type
+  preemptible   = var.preemptible
+  labels        = var.labels
+
+  ### disk ###
+  disk_size = var.disk_size
+  disk_type = var.disk_type
+
+  on_host_maintenance = var.on_host_maintenance
 
   ### metadata ###
   metadata = {
     block-project-ssh-keys = "TRUE"
+    shutdown-script        = <<-EOT
+      #!/bin/bash
+      userdel -r ${var.ssh_username}
+      sed -i '/${var.ssh_username}/d' /var/lib/google/google_users
+    EOT
   }
+
+  state_timeout = "10m"
 }
 
 #########
@@ -80,41 +128,7 @@ build {
   ### general ###
   name = "slurm-gcp"
 
-  ### builds ###
-  dynamic "source" {
-    for_each = var.builds
-    labels = [
-      "sources.googlecompute.image",
-    ]
-    content {
-      #name = source.key
-      name = source.value.source_image_family
-
-      ### image ###
-      source_image        = source.value.source_image
-      source_image_family = source.value.source_image_family
-
-      image_name        = "${var.prefix}-v5-slurm-${local.slurm_semver}-${source.value.source_image_family}-{{timestamp}}"
-      image_family      = "${var.prefix}-v5-slurm-${local.slurm_semver}-${source.value.source_image_family}"
-      image_description = "slurm-gcp-v5"
-      image_licenses    = source.value.image_licenses
-      image_labels      = source.value.labels
-
-      ### ssh ###
-      ssh_username = source.value.ssh_username
-      ssh_password = source.value.ssh_password
-
-      ### instance ###
-      instance_name = "${var.prefix}-v5-slurm-${local.slurm_semver}-${source.value.source_image_family}-{{timestamp}}"
-      machine_type  = source.value.machine_type
-      preemptible   = source.value.preemptible
-      labels        = source.value.labels
-
-      ### disk ###
-      disk_size = source.value.disk_size
-      disk_type = source.value.disk_type
-    }
-  }
+  sources = ["sources.googlecompute.image"]
 
   ### provision Slurm ###
   provisioner "ansible" {
@@ -156,9 +170,9 @@ build {
   }
 
   ### clean up /home/packer ###
-  provisioner "shell" {
-    inline = [
-      "sudo rm -rf /home/packer"
-    ]
-  }
+  #provisioner "shell" {
+  #  inline = [
+  #    "sudo su root -c 'userdel -rf packer'"
+  #  ]
+  #}
 }
