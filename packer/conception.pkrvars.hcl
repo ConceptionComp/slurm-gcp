@@ -24,13 +24,16 @@ zone       = "us-central1-a"
 #########
 
 # NOTE: Your Project ID will be automatically appended
-source_image_project_id = [
-  # "rhel-cloud",
-  # "centos-cloud",
-  # "cloud-hpc-image-public",
-  "debian-cloud",
-  "ubuntu-os-cloud",
-]
+# source_image_project_id = [
+#   # "rhel-cloud",
+#   # "centos-cloud",
+#   # "cloud-hpc-image-public",
+#   "debian-cloud",
+#   "ubuntu-os-cloud",
+# ]
+
+source_image_project_id = "ubuntu-os-cloud"
+
 
 # *NOT* intended for production use
 # skip_create_image = true
@@ -56,7 +59,7 @@ tags = [
 # PROVISION #
 #############
 
-slurm_version = "22.05.8"
+# slurm_version = "22.05.8"
 
 # Disable some ansible roles here; they are enabled by default
 install_cuda = false
