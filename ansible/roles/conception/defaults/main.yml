@@ -87,15 +87,15 @@ apps:
       dir: '{{paths.apps}}/gatk/4.3.0.0/gatk-4.3.0.0'
       cmds:
         - sed -ie 's/python/python2.7/g' gatk
-  - name: macs
-    url: https://github.com/macs3-project/MACS/archive/refs/tags/v2.2.7.1.tar.gz
-    dest: '{{paths.apps}}/macs/v2.2.7.1'
-    modulefiles: '{{paths.modulefiles}}/macs/v2.2.7.1.lua'
-    install:
-      dir: '{{paths.apps}}/macs/v2.2.7.1'
-      cmds:
-        - sed -i 's/install_requires = \[f"numpy>={numpy_requires}",\]/install_requires = \[f"numpy{numpy_requires}",\]/' setup.py
-        - pip3 install -e .
+  # - name: macs
+  #   url: https://github.com/macs3-project/MACS/archive/refs/tags/v2.2.7.1.tar.gz
+  #   dest: '{{paths.apps}}/macs/v2.2.7.1'
+  #   modulefiles: '{{paths.modulefiles}}/macs/v2.2.7.1.lua'
+  #   install:
+  #     dir: '{{paths.apps}}/macs/v2.2.7.1'
+  #     cmds:
+  #       - sed -i 's/install_requires = \[f"numpy>={numpy_requires}",\]/install_requires = \[f"numpy{numpy_requires}",\]/' setup.py
+  #       - pip3 install -e .
   - name: homer
     url:  http://homer.ucsd.edu/homer/configureHomer.pl
     dest: '{{paths.apps}}/homer/latest'
