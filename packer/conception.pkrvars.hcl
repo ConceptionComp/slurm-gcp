@@ -76,7 +76,7 @@ prefix = "conception"
 
 ### Service Account ###
 
-service_account_email = "default"
+service_account_email = "packer@conception-automation.iam.gserviceaccount.com"
 
 service_account_scopes = [
   "https://www.googleapis.com/auth/cloud-platform",
