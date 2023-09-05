@@ -9,7 +9,9 @@ apt-get update && apt-get install -y \
     libgpgme11-dev \
     squashfs-tools \
     libseccomp-dev \
-    pkg-config
+    pkg-config \
+    cryptsetup \
+    runc
 
 export GOLANG_VERSION=1.20.5
 export SINGULARITY_VERSION=3.11.4
