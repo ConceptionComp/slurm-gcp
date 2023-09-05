@@ -4,3 +4,8 @@ umi_tools
 deeptools
 vireoSNP
 MACS2
+multiqc
+cutadapt
+sinto
+keyrings
+keyrings.google-artifactregistry-auth
