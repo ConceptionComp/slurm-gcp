@@ -7,5 +7,5 @@ MACS2
 multiqc
 cutadapt
 sinto
-keyrings
+keyring
 keyrings.google-artifactregistry-auth

@@ -8,6 +8,6 @@ more-executors~=2.0
 multiqc
 cutadapt
 sinto
-keyrings
+keyring
 keyrings.google-artifactregistry-auth
 prometheus-client~=0.16
