@@ -104,7 +104,8 @@ apps:
     install:
       dir: '{{paths.apps}}/homer/latest/'
       cmds:
-        - perl configureHomer.pl -install hg38 
+        - 'perl {{paths.apps}}/homer/latest/configureHomer.pl -install'
+        - 'perl {{paths.apps}}/homer/latest/configureHomer.pl -install hg38'
   - name: fastx_toolkit
     url:  http://hannonlab.cshl.edu/fastx_toolkit/fastx_toolkit_0.0.13_binaries_Linux_2.6_amd64.tar.bz2
     dest: '{{paths.apps}}/fastx_toolkit/0.0.13'
