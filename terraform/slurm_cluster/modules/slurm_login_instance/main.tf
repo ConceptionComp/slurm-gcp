@@ -25,17 +25,10 @@ locals {
     : var.region
   )
 
-  suffix = random_string.suffix.result
-}
-
-##########
-# RANDOM #
-##########
-
-resource "random_string" "suffix" {
-  length  = 8
-  upper   = false
-  special = false
+  access_config = {
+    nat_ip       = null
+    network_tier = var.network_tier
+  }
 }
 
 ############
@@ -45,16 +38,10 @@ resource "random_string" "suffix" {
 module "slurm_login_instance" {
   source = "../_slurm_instance"
 
-  access_config       = var.access_config
+  access_config       = var.enable_public_ip ? [local.access_config] : []
   add_hostname_suffix = true
-  hostname            = "${var.slurm_cluster_name}-login-${local.suffix}"
+  hostname            = "${var.slurm_cluster_name}-login-${var.suffix}"
   instance_template   = var.instance_template
-  metadata = merge(
-    var.metadata,
-    {
-      slurm_login_suffix = local.suffix
-    },
-  )
   network             = var.network
   num_instances       = var.num_instances
   project_id          = var.project_id
@@ -65,26 +52,4 @@ module "slurm_login_instance" {
   subnetwork_project  = var.subnetwork_project
   subnetwork          = var.subnetwork
   zone                = var.zone
-
-  slurm_depends_on = var.slurm_depends_on
-  depends_on = [
-    # Ensure delta when user startup scripts change
-    google_compute_project_metadata_item.login_startup_scripts,
-  ]
-}
-
-###########
-# SCRIPTS #
-###########
-
-resource "google_compute_project_metadata_item" "login_startup_scripts" {
-  project = var.project_id
-
-  for_each = {
-    for x in var.login_startup_scripts
-    : replace(basename(x.filename), "/[^a-zA-Z0-9-_]/", "_") => x
-  }
-
-  key   = "${var.slurm_cluster_name}-slurm-login_${local.suffix}-script-${each.key}"
-  value = each.value.content
 }

@@ -1,6 +1,7 @@
 ### General ###
 *.cache
 *.log
+*.zip
 
 ### Ansible ###
 *.retry
@@ -27,6 +28,7 @@ __pycache__/
 *.tfstate.*
 *.tfvars
 !example.tfvars
+!tpu_example.tfvars
 .terraform.lock.hcl
 
 ### Vagrant ###

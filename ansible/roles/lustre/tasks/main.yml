@@ -13,19 +13,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-- name: Install Dependancies
-  package:
-    name:
-    - wget
-    state: present
-
-- name: Mkdir
-  file:
-    name: '{{lustre_artifacts_dir}}'
-    state: directory
-
 - name: Include OS Family Dependent Vars
-  include_vars: '{{ansible_os_family}}.yml'
+  ansible.builtin.include_vars: '{{ item }}'
+  with_first_found:
+  - '{{ ansible_distribution|lower }}-{{ ansible_distribution_version }}.yml'
+  - '{{ ansible_distribution|lower }}-{{ ansible_distribution_major_version }}.yml'
+  - '{{ ansible_distribution|lower }}.yml'
+  - '{{ ansible_os_family|lower }}-{{ ansible_distribution_version }}.yml'
+  - '{{ ansible_os_family|lower }}-{{ ansible_distribution_major_version }}.yml'
+  - '{{ ansible_os_family|lower }}.yml'
 
 - name: Include OS Family Dependent Tasks
-  include_tasks: os/{{ansible_os_family}}.yml
+  include_tasks: '{{ item }}'
+  with_first_found:
+  - os/{{ ansible_distribution|lower }}-{{ ansible_distribution_version }}.yml
+  - os/{{ ansible_distribution|lower }}-{{ ansible_distribution_major_version }}.yml
+  - os/{{ ansible_distribution|lower }}.yml
+  - os/{{ ansible_os_family|lower }}-{{ ansible_distribution_version }}.yml
+  - os/{{ ansible_os_family|lower }}-{{ ansible_distribution_major_version }}.yml
+  - os/{{ ansible_os_family|lower }}.yml
+  when: lustre_install
+
+- name: Wait for DPKG Locks
+  ansible.builtin.shell: >
+    while fuser /var/lib/dpkg/{{ item }} >/dev/null 2>&1; do
+      sleep 5
+    done
+  with_items:
+  - lock
+  - lock-frontend
+  when:
+  - lustre_install
+  - ansible_os_family == 'Debian'
+
+- name: Install Lustre Client
+  ansible.builtin.package:
+    name: '{{ lustre_packages }}'
+    state: present
+  when: lustre_install
+
+- name: Skip Lustre install
+  ansible.builtin.debug:
+    msg: Lustre install has been disabled for this OS
+  when: not lustre_install

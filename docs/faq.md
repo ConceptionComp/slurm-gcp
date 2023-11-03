@@ -71,22 +71,14 @@ out. Tickets can be submitted via
 
 ### How do I enable additional logging for Slurm-GCP?
 
-1. Enable debug logging in cluster `config.yaml`
+1. Enable debug logging using terraform enable_debug_logging variable.
 1. If you need more, such as verbose GCP API request information, enable the
-   appropriate logging flag in `config.yaml`.
+   appropriate logging flag using terrafor extra_logging_flags variable (See the
+   logging_flags variable in scripts/util.py to get the list of supported log
+   flags).
    - For verbose API request information, use the `trace_api` logging flag.
 1. These increase the logging to Slurm-GCP script logs only, such as
    `resume.log` and `suspend.log`.
-
-```yaml
-# /slurm/scripts/config.yaml
-enable_debug_logging: false
-extra_logging_flags:
-  trace_api: false
-  subproc: false
-  hostlists: false
-  subscriptions: false
-```
 
 ### How do I move data for a job?
 
@@ -235,10 +227,10 @@ accross all instances and allows easy user control with
 
 By default, the [slurm_cluster](../terraform/slurm_cluster/README.md) terraform
 module uses the latest Slurm image family (e.g.
-`schedmd-v5-slurm-22-05-8-hpc-centos-7`). As new Slurm image families are
-released, coenciding with periodic Slurm releases, the terraform module will be
-updated to track the newest image family by setting it as the new default. This
-update can be considered a breaking change.
+`slurm-gcp-6-1-hpc-rocky-linux-8`). As new Slurm image families are released,
+coenciding with periodic Slurm releases, the terraform module will be updated to
+track the newest image family by setting it as the new default. This update can
+be considered a breaking change.
 
 In a production setting, it is recommended to explicitly set an image family.
 Doing so will prevent `slurm-gcp` changes to the default image family from

@@ -20,24 +20,28 @@ limitations under the License.
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | ~> 1.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | >= 3.53, < 5.0 |
 | <a name="requirement_local"></a> [local](#requirement\_local) | ~> 2.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_local"></a> [local](#provider\_local) | 2.3.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | >= 3.53, < 5.0 |
+| <a name="provider_local"></a> [local](#provider\_local) | ~> 2.0 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_instance_template"></a> [instance\_template](#module\_instance\_template) | terraform-google-modules/vm/google//modules/instance_template | ~> 7.1 |
+| <a name="module_instance_template"></a> [instance\_template](#module\_instance\_template) | ../_instance_template | n/a |
 
 ## Resources
 
 | Name | Type |
 |------|------|
+| [google_compute_default_service_account.this](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/compute_default_service_account) | data source |
+| [google_service_account.this](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/service_account) | data source |
 | [local_file.startup](https://registry.terraform.io/providers/hashicorp/local/latest/docs/data-sources/file) | data source |
 
 ## Inputs
@@ -45,6 +49,7 @@ limitations under the License.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_additional_disks"></a> [additional\_disks](#input\_additional\_disks) | List of maps of disks. | <pre>list(object({<br>    disk_name    = string<br>    device_name  = string<br>    disk_type    = string<br>    disk_size_gb = number<br>    disk_labels  = map(string)<br>    auto_delete  = bool<br>    boot         = bool<br>  }))</pre> | `[]` | no |
+| <a name="input_bandwidth_tier"></a> [bandwidth\_tier](#input\_bandwidth\_tier) | Tier 1 bandwidth increases the maximum egress bandwidth for VMs.<br>Using the `virtio_enabled` setting will only enable VirtioNet and will not enable TIER\_1.<br>Using the `tier_1_enabled` setting will enable both gVNIC and TIER\_1 higher bandwidth networking.<br>Using the `gvnic_enabled` setting will only enable gVNIC and will not enable TIER\_1.<br>Note that TIER\_1 only works with specific machine families & shapes and must be using an image that supports gVNIC. See [official docs](https://cloud.google.com/compute/docs/networking/configure-vm-with-high-bandwidth-configuration) for more details. | `string` | `"platform_default"` | no |
 | <a name="input_can_ip_forward"></a> [can\_ip\_forward](#input\_can\_ip\_forward) | Enable IP forwarding, for NAT instances for example. | `bool` | `false` | no |
 | <a name="input_disable_smt"></a> [disable\_smt](#input\_disable\_smt) | Disables Simultaneous Multi-Threading (SMT) on instance. | `bool` | `false` | no |
 | <a name="input_disk_auto_delete"></a> [disk\_auto\_delete](#input\_disk\_auto\_delete) | Whether or not the boot disk should be auto-deleted. | `bool` | `true` | no |
@@ -68,14 +73,17 @@ limitations under the License.
 | <a name="input_region"></a> [region](#input\_region) | Region where the instance template should be created. | `string` | `null` | no |
 | <a name="input_service_account"></a> [service\_account](#input\_service\_account) | Service account to attach to the instances. See<br>'main.tf:local.service\_account' for the default. | <pre>object({<br>    email  = string<br>    scopes = set(string)<br>  })</pre> | `null` | no |
 | <a name="input_shielded_instance_config"></a> [shielded\_instance\_config](#input\_shielded\_instance\_config) | Shielded VM configuration for the instance. Note: not used unless<br>enable\_shielded\_vm is 'true'.<br>* enable\_integrity\_monitoring : Compare the most recent boot measurements to the<br>  integrity policy baseline and return a pair of pass/fail results depending on<br>  whether they match or not.<br>* enable\_secure\_boot : Verify the digital signature of all boot components, and<br>  halt the boot process if signature verification fails.<br>* enable\_vtpm : Use a virtualized trusted platform module, which is a<br>  specialized computer chip you can use to encrypt objects like keys and<br>  certificates. | <pre>object({<br>    enable_integrity_monitoring = bool<br>    enable_secure_boot          = bool<br>    enable_vtpm                 = bool<br>  })</pre> | <pre>{<br>  "enable_integrity_monitoring": true,<br>  "enable_secure_boot": true,<br>  "enable_vtpm": true<br>}</pre> | no |
+| <a name="input_slurm_bucket_path"></a> [slurm\_bucket\_path](#input\_slurm\_bucket\_path) | GCS Bucket URI of Slurm cluster file storage. | `string` | n/a | yes |
 | <a name="input_slurm_cluster_name"></a> [slurm\_cluster\_name](#input\_slurm\_cluster\_name) | Cluster name, used for resource naming. | `string` | n/a | yes |
 | <a name="input_slurm_instance_role"></a> [slurm\_instance\_role](#input\_slurm\_instance\_role) | Slurm instance type. Must be one of: controller; login; compute; or null. | `string` | `null` | no |
 | <a name="input_source_image"></a> [source\_image](#input\_source\_image) | Source disk image. | `string` | `""` | no |
 | <a name="input_source_image_family"></a> [source\_image\_family](#input\_source\_image\_family) | Source image family. | `string` | `""` | no |
 | <a name="input_source_image_project"></a> [source\_image\_project](#input\_source\_image\_project) | Project where the source image comes from. If it is not provided, the provider project is used. | `string` | `""` | no |
+| <a name="input_spot"></a> [spot](#input\_spot) | Provision as a SPOT preemptible instance.<br>See https://cloud.google.com/compute/docs/instances/spot for more details. | `bool` | `false` | no |
 | <a name="input_subnetwork"></a> [subnetwork](#input\_subnetwork) | The name of the subnetwork to attach this interface to. The subnetwork must<br>exist in the same region this instance will be created in. Either network or<br>subnetwork must be provided. | `string` | `null` | no |
 | <a name="input_subnetwork_project"></a> [subnetwork\_project](#input\_subnetwork\_project) | The ID of the project in which the subnetwork belongs. If it is not provided, the provider project is used. | `string` | `null` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Network tag list. | `list(string)` | `[]` | no |
+| <a name="input_termination_action"></a> [termination\_action](#input\_termination\_action) | Which action to take when Compute Engine preempts the VM. Value can be: 'STOP', 'DELETE'. The default value is 'STOP'.<br>See https://cloud.google.com/compute/docs/instances/spot for more details. | `string` | `"STOP"` | no |
 
 ## Outputs
 
@@ -84,5 +92,6 @@ limitations under the License.
 | <a name="output_instance_template"></a> [instance\_template](#output\_instance\_template) | Instance template details |
 | <a name="output_name"></a> [name](#output\_name) | Name of instance template |
 | <a name="output_self_link"></a> [self\_link](#output\_self\_link) | Self\_link of instance template |
+| <a name="output_service_account"></a> [service\_account](#output\_service\_account) | Service account object, includes email and scopes. |
 | <a name="output_tags"></a> [tags](#output\_tags) | Tags that will be associated with instance(s) |
 <!-- END OF PRE-COMMIT-TERRAFORM DOCS HOOK -->

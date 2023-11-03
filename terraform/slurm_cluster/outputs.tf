@@ -19,13 +19,24 @@ output "slurm_cluster_name" {
   value       = var.slurm_cluster_name
 }
 
+output "cluster_config" {
+  description = "Slurm partition details."
+  value       = module.slurm_files.config
+}
+
 output "slurm_partition" {
   description = "Slurm partition details."
-  value = (
-    var.enable_hybrid
-    ? module.slurm_controller_hybrid[0].partitions
-    : module.slurm_controller_instance[0].partitions
-  )
+  value       = module.slurm_files.partitions
+}
+
+output "slurm_nodeset" {
+  description = "Slurm nodeset details."
+  value       = module.slurm_files.nodeset
+}
+
+output "slurm_nodeset_dyn" {
+  description = "Slurm partition details."
+  value       = module.slurm_files.nodeset_dyn
 }
 
 output "slurm_controller_instances" {
@@ -42,7 +53,7 @@ output "slurm_controller_instance_self_links" {
   value = (
     var.enable_hybrid
     ? []
-    : module.slurm_controller_instance[0].slurm_controller_instance.instances_details[*].self_link
+    : module.slurm_controller_instance[0].instances_self_links
   )
 }
 
@@ -53,6 +64,7 @@ output "slurm_controller_instance_details" {
     ? []
     : module.slurm_controller_instance[0].slurm_controller_instance.instances_details[*]
   )
+  sensitive = true
 }
 
 output "slurm_login_instance_self_links" {
@@ -67,4 +79,19 @@ output "slurm_login_instance_details" {
   value = flatten(values({
     for k, v in module.slurm_login_instance : k => v.slurm_login_instance.instances_details[*]
   }))
+  sensitive = true
+}
+
+output "cloud_logging_filter" {
+  description = "Cloud Logging filter to find startup errors."
+  value = (
+    var.enable_hybrid
+    ? module.slurm_controller_hybrid[0].cloud_logging_filter
+    : module.slurm_controller_instance[0].cloud_logging_filter
+  )
+}
+
+output "slurm_bucket_path" {
+  description = "Bucket path used by cluster."
+  value       = module.slurm_files.slurm_bucket_path
 }

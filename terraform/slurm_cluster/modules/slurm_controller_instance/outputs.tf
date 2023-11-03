@@ -28,6 +28,11 @@ output "slurm_controller_instances" {
   value       = module.slurm_controller_instance.slurm_instances
 }
 
+output "instances_self_links" {
+  description = "Controller instance resource."
+  value       = module.slurm_controller_instance.instances_self_links
+}
+
 #########
 # SLURM #
 #########
@@ -37,12 +42,19 @@ output "slurm_cluster_name" {
   value       = var.slurm_cluster_name
 }
 
-output "partitions" {
-  description = "Cluster partitions."
-  value       = local.partitions
+output "cloudsql_secret" {
+  description = "Cloudsql secret by URI."
+  value       = one(google_secret_manager_secret_version.cloudsql_version[*].id)
 }
 
-output "compute_list" {
-  description = "Cluster compute list."
-  value       = local.compute_list
+##########
+# GOOGLE #
+##########
+
+output "cloud_logging_filter" {
+  description = "Cloud Logging filter to find startup errors."
+  value       = <<-EOT
+  resource.type="gce_instance"
+  logName=("projects/${var.project_id}/logs/slurm_resume" OR "projects/${var.project_id}/logs/slurm_suspend" OR "projects/${var.project_id}/logs/slurm_sync" OR "projects/${var.project_id}/logs/slurmctld" OR "projects/${var.project_id}/logs/slurmd" OR "projects/${var.project_id}/logs/slurmdbd") OR (logName=("projects/${var.project_id}/logs/syslog") AND jsonPayload.message=~"google_metadata_script_runner")
+  EOT
 }

@@ -14,17 +14,12 @@
  * limitations under the License.
  */
 
+output "partition_name" {
+  description = "Partition for slurm controller."
+  value       = local.partition.partition_name
+}
+
 output "partition" {
   description = "Partition for slurm controller."
   value       = local.partition
-}
-
-output "partition_nodes" {
-  description = "Partition for slurm controller."
-  value       = local.partition_nodes
-}
-
-output "compute_list" {
-  description = "List of compute node hostnames."
-  value       = local.compute_list
 }

@@ -9,10 +9,12 @@ apt-get update && apt-get install -y \
     libgpgme11-dev \
     squashfs-tools \
     libseccomp-dev \
-    pkg-config
+    pkg-config \
+    cryptsetup \
+    runc
 
-export GOLANG_VERSION=1.19.5
-export SINGULARITY_VERSION=3.10.5
+export GOLANG_VERSION=1.20.5
+export SINGULARITY_VERSION=3.11.4
 
 mkdir -p /opt/go/${GOLANG_VERSION}
 mkdir -p /opt/singularity/${SINGULARITY_VERSION}

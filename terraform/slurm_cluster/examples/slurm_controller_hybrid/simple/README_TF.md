@@ -27,14 +27,19 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 4.55.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.4.3 |
+| <a name="provider_google"></a> [google](#provider\_google) | >= 3.53, < 5.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_slurm_compute0"></a> [slurm\_compute0](#module\_slurm\_compute0) | ../../../modules/slurm_instance_template | n/a |
+| <a name="module_slurm_compute1"></a> [slurm\_compute1](#module\_slurm\_compute1) | ../../../modules/slurm_instance_template | n/a |
 | <a name="module_slurm_controller_hybrid"></a> [slurm\_controller\_hybrid](#module\_slurm\_controller\_hybrid) | ../../../modules/slurm_controller_hybrid | n/a |
+| <a name="module_slurm_files"></a> [slurm\_files](#module\_slurm\_files) | ../../../modules/slurm_files | n/a |
+| <a name="module_slurm_nodeset0"></a> [slurm\_nodeset0](#module\_slurm\_nodeset0) | ../../../modules/slurm_nodeset | n/a |
+| <a name="module_slurm_nodeset1"></a> [slurm\_nodeset1](#module\_slurm\_nodeset1) | ../../../modules/slurm_nodeset | n/a |
 | <a name="module_slurm_partition0"></a> [slurm\_partition0](#module\_slurm\_partition0) | ../../../modules/slurm_partition | n/a |
 | <a name="module_slurm_partition1"></a> [slurm\_partition1](#module\_slurm\_partition1) | ../../../modules/slurm_partition | n/a |
 
@@ -49,6 +54,7 @@ limitations under the License.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_bucket_name"></a> [bucket\_name](#input\_bucket\_name) | Name of GCS bucket to use. | `string` | n/a | yes |
 | <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Project ID to create resources in. | `string` | n/a | yes |
 | <a name="input_region"></a> [region](#input\_region) | The region to place resources. | `string` | n/a | yes |
 

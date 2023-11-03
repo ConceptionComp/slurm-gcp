@@ -12,11 +12,13 @@ from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
-from string import Template
 
 import paramiko
 from tftest import TerraformTest
 from testutils import backoff_delay, spawn, term_proc, NSDict
+
+sys.path.append("../scripts")
+import util  # noqa: E402
 
 
 log = logging.getLogger()
@@ -105,26 +107,28 @@ class Configuration:
     image_project: str
     image: str = None
     image_family: str = None
+    marks: list = field(default_factory=list)
 
     def __post_init__(self):
         self.tf = TerraformTest(self.moduledir)
         tmp = self._template_tfvars = self.tfvars_file
-        # basic.tfvars.tpl -> <cluster_name>-basic.tfvars
+        # basic.tfvars -> <cluster_name>-basic.tfvars
         self.tfvars_file = self._template_tfvars.with_name(
             f"{self.cluster_name}-{tmp.stem}"
         )
-        self.tfvars_file.write_text(
-            Template(tmp.read_text()).substitute(
-                {
-                    k: f'"{str(v)}"' if v is not None else "null"
-                    for k, v in self.__dict__.items()
-                }
-            )
-        )
+        self.tfvars_file.write_text(tmp.read_text())
+
+        vars = {
+            "project_id": self.project_id,
+            "slurm_cluster_name": self.cluster_name,
+            "source_image_family": self.image_family,
+            "source_image_project": self.image_project,
+        }
+        self.tfvars = {**self.tfvars, **vars}
 
     def __str__(self):
         image = self.image or self.image_family
-        return f"{self.cluster_name}: project={self.project_id} image={self.image_project}/{image} tfmodule={self.moduledir} tfvars={self.tfvars_file}"
+        return f"{self.cluster_name}: project={self.project_id} image={self.image_project}/{image} tfmodule={self.moduledir} tfvars={self.tfvars_file} vars={self.tfvars}"
 
     def setup(self, **kwargs):
         all_args = dict(extra_files=[self.tfvars_file], cleanup_on_exit=False)
@@ -176,8 +180,7 @@ class Tunnel:
             )
             stdout_sel = select.poll()
             stdout_sel.register(stdout, select.POLLIN)
-            for w in backoff_delay(0.5, count=30, timeout=30):
-                time.sleep(w)
+            for w in backoff_delay(0.5, timeout=30):
                 if proc.poll() is None:
                     if stdout_sel.poll(1):
                         out = stdout.readline()
@@ -191,6 +194,7 @@ class Tunnel:
                         f"gcloud iap-tunnel failed on port {port}, rc: {proc.returncode}, stderr: {stderr}"
                     )
                     return None
+                time.sleep(w)
             log.error(f"gcloud iap-tunnel timed out on port {port}")
             proc.kill()
             return None
@@ -220,18 +224,16 @@ class Cluster:
             self.wait_on_active()
 
     def wait_on_active(self):
-        node_state = re.compile(r"State=(\S+)\s")
-        for wait in backoff_delay(2, count=20, timeout=240):
+        for wait in backoff_delay(5, timeout=600):
+            nodes = []
             try:
-                result = self.controller_exec("scontrol show -o nodes")
-                if result.exit_status == 0 and all(
-                    s[1].startswith("IDLE")
-                    for s in node_state.finditer(result["stdout"])
-                    if s[1]
-                ):
+                nodes = self.get_nodes()
+                if all(node["state"][0] == "IDLE" for node in nodes):
                     break
             except Exception as e:
-                log.error(e)
+                log.error(
+                    f"Error getting node state {'+'.join(nodes[0]) if nodes else ''}: {e}"
+                )
             time.sleep(wait)
         else:
             raise Exception("Cluster never came up")
@@ -252,7 +254,7 @@ class Cluster:
         ssh = paramiko.SSHClient()
         key = paramiko.RSAKey.from_private_key_file(self.keyfile)
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        for wait in backoff_delay(1, count=20, timeout=300):
+        for wait in backoff_delay(1, timeout=300):
             tun = self.tunnels[instance]
             log.info(
                 f"start ssh connection to {self.user}@{trim_self_link(instance)} port {tun.port}"
@@ -376,14 +378,34 @@ class Cluster:
     def login_name(self):
         return trim_self_link(self.login_link)
 
+    @util.cached_property
+    def cfg(self):
+        # download the config.yaml from the controller and load it locally
+        cluster_name = self.tf.output()["slurm_cluster_name"]
+        cfgfile = Path(f"{cluster_name}-config.yaml")
+        cfgfile.write_text(
+            self.controller_exec_output("sudo cat /slurm/scripts/config.yaml")
+        )
+        return util.load_config_file(cfgfile)
+
     def get_jobs(self):
-        return json.loads(self.login_exec("squeue --json")["stdout"])["jobs"]
+        out = self.login_exec("scontrol show jobs --json")["stdout"]
+        try:
+            return json.loads(out)["jobs"]
+        except Exception as e:
+            log.error(f"failed to get jobs: {out}")
+            raise e
 
     def get_job(self, job_id):
         return next((j for j in self.get_jobs() if j["job_id"] == job_id), None)
 
     def get_nodes(self):
-        return json.loads(self.login_exec("sinfo --json")["stdout"])["nodes"]
+        out = self.login_exec("scontrol show nodes --json")["stdout"]
+        try:
+            return json.loads(out)["nodes"]
+        except Exception as e:
+            log.error(f"failed to get nodes: {out}")
+            raise e
 
     def get_node(self, nodename):
         return next((n for n in self.get_nodes() if n["name"] == nodename), None)
