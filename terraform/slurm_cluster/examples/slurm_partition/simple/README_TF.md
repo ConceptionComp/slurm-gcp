@@ -27,13 +27,16 @@ limitations under the License.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 4.55.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | >= 3.53, < 5.0 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_compute"></a> [compute](#module\_compute) | ../../../modules/slurm_instance_template | n/a |
 | <a name="module_slurm_compute_sa"></a> [slurm\_compute\_sa](#module\_slurm\_compute\_sa) | ../../../../slurm_sa_iam | n/a |
+| <a name="module_slurm_files"></a> [slurm\_files](#module\_slurm\_files) | ../../../modules/slurm_files | n/a |
+| <a name="module_slurm_nodeset"></a> [slurm\_nodeset](#module\_slurm\_nodeset) | ../../../modules/slurm_nodeset | n/a |
 | <a name="module_slurm_partition"></a> [slurm\_partition](#module\_slurm\_partition) | ../../../modules/slurm_partition | n/a |
 
 ## Resources
@@ -46,6 +49,7 @@ limitations under the License.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_bucket_name"></a> [bucket\_name](#input\_bucket\_name) | Name of GCS bucket to use. | `string` | n/a | yes |
 | <a name="input_project_id"></a> [project\_id](#input\_project\_id) | Project ID to create resources in. | `string` | n/a | yes |
 | <a name="input_region"></a> [region](#input\_region) | The region to place resources. | `string` | n/a | yes |
 | <a name="input_slurm_cluster_name"></a> [slurm\_cluster\_name](#input\_slurm\_cluster\_name) | Cluster name, used for resource naming. | `string` | `"simple"` | no |

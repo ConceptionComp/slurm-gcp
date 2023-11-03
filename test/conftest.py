@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,7 @@ log = logging.getLogger()
 root = Path(__file__).parent.parent
 tf_path = root / "terraform"
 test_path = root / "test"
+tfvars_path = test_path / "tfvars"
 
 
 def pytest_addoption(parser):
@@ -44,6 +46,9 @@ def pytest_addoption(parser):
     parser.addoption(
         "--image-project", action="store", help="image project to use for test cluster"
     )
+    parser.addoption(
+        "--image-marker", action="store", nargs="?", type=str, help="image marker label"
+    )
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -58,25 +63,69 @@ def pytest_runtest_makereport(item, call):
     setattr(item, "rep_" + rep.when, rep)
 
 
-CONFIGS = {
-    pytest.param("basic"): dict(
-        moduledir=tf_path / "slurm_cluster/examples/slurm_cluster/cloud/basic",
-        tfvars_file=test_path / "basic.tfvars.tpl",
+# We need to discriminate between arch (arm64, x86_64) because a configuration
+# is mapped to a tfvars file that contains instances for an input image.
+# Image arch must match instance arch, otherwise instance boot failure.
+#
+# NOTE: config key should follow: pytest.param("${ARCH}-${TF_CONFIG}")
+#
+# Use the following to discriminate arch for testing.
+# $ pytest -k EXPR
+CONFIGS = [
+    dict(
+        marks=("x86_64", "basic"),
+        moduledir=tf_path / "slurm_cluster/examples/slurm_cluster/test_cluster",
+        tfvars_file=tfvars_path / "x86_64-basic.tfvars",
         tfvars={},
     ),
-}
+    dict(
+        marks=("arm64", "basic"),
+        moduledir=tf_path / "slurm_cluster/examples/slurm_cluster/test_cluster",
+        tfvars_file=tfvars_path / "arm64-basic.tfvars",
+        tfvars={},
+    ),
+]
+CONFIGS = {"-".join(conf["marks"]): conf for conf in CONFIGS}
+image_pattern = re.compile(
+    r"^(?:(?P<prefix>\w+)-)?slurm-gcp-(?:(?P<version>(?P<major>\d+)-(?P<minor>\d+)(?:-(?P<patch>\d+))?)|(?P<branch>\w+))-(?P<marker>[\w\-]+?)(?:-(?P<timestamp>\w{10}))?$"
+)
+
+params = (
+    pytest.param(k, marks=[getattr(pytest.mark, mark) for mark in conf["marks"]])
+    for k, conf in CONFIGS.items()
+)
 
 
-@pytest.fixture(params=CONFIGS.keys(), scope="session")
-def configuration(request):
+@pytest.fixture(scope="session")
+def image_marker(request):
+    from_image = next(
+        m.group("marker")
+        for m in (
+            image_pattern.match(request.config.getoption("image") or ""),
+            image_pattern.match(request.config.getoption("image_family" or "")),
+        )
+        if m
+    )
+    return request.config.getoption("image_marker") or from_image
+
+
+@pytest.fixture(params=params, scope="session")
+def configuration(request, image_marker):
     """fixture providing terraform cluster configuration"""
+    project_id = request.config.getoption("project_id")
+    cluster_name = request.config.getoption("cluster_name")
+    image_project = request.config.getoption("image_project")
+    image_family = request.config.getoption("image_family")
+    image = request.config.getoption("image")
+    request.applymarker(image_marker)
+
     config = Configuration(
-        project_id=request.config.getoption("project_id"),
-        cluster_name=request.config.getoption("cluster_name"),
-        image_project=request.config.getoption("image_project"),
-        image_family=request.config.getoption("image_family"),
-        image=request.config.getoption("image"),
-        **CONFIGS[pytest.param(request.param)],
+        cluster_name=cluster_name,
+        project_id=project_id,
+        image_project=image_project,
+        image_family=image_family,
+        image=image,
+        **CONFIGS[request.param],
     )
     log.info(f"init cluster {str(config)}")
     config.setup()
@@ -123,13 +172,7 @@ def cluster(request, applied):
 @pytest.fixture(scope="session")
 def cfg(cluster: Cluster):
     """fixture providing util config for the cluster"""
-    # download the config.yaml from the controller and load it locally
-    cluster_name = cluster.tf.output()["slurm_cluster_name"]
-    cfgfile = Path(f"{cluster_name}-config.yaml")
-    cfgfile.write_text(
-        cluster.controller_exec_output("sudo cat /slurm/scripts/config.yaml")
-    )
-    return util.load_config_file(cfgfile)
+    return cluster.cfg
 
 
 @pytest.fixture(scope="session")

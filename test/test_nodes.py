@@ -13,13 +13,13 @@ from testutils import (
     sbatch,
     util,
 )
+from util import Lookup
 
 
 log = logging.getLogger()
 
 
 def test_static(cluster: Cluster, lkp: util.Lookup):
-
     power_states = set(
         (
             "POWERING_DOWN",
@@ -30,8 +30,9 @@ def test_static(cluster: Cluster, lkp: util.Lookup):
 
     def is_node_up(node):
         info = cluster.get_node(node)
-        state = info["state"]
-        flags = set(info["state_flags"])
+        state, *flags = info["state"]
+        state = state.lower()
+        flags = set(flags)
         log.info(
             f"waiting for static node {node} to be up; state={state} flags={','.join(flags)}"
         )
@@ -43,8 +44,19 @@ def test_static(cluster: Cluster, lkp: util.Lookup):
         assert wait_until(is_node_up, node)
 
 
-def test_exclusive_labels(cluster: Cluster, lkp: util.Lookup):
+def test_compute_startup_scripts(cluster: Cluster, lkp: Lookup):
+    """check that custom compute startup scripts ran on static nodes"""
+    # TODO check non static too?
+    for node in chain.from_iterable(
+        hostlist.expand_hostlist(nodes) for nodes in lkp.static_nodelist()
+    ):
+        node_ssh = cluster.ssh(lkp.instance(node).selfLink)
+        check = cluster.exec_cmd(node_ssh, "ls /slurm/out/compute")
+        log.debug(f"{check.command}: {check.stdout or check.stderr}")
+        assert check.exit_status == 0
 
+
+def test_exclusive_labels(cluster: Cluster, lkp: util.Lookup):
     partitions = []
     for part_name, partition in lkp.cfg.partitions.items():
         if partition.enable_job_exclusive:

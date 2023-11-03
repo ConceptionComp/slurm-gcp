@@ -33,3 +33,8 @@ output "tags" {
   description = "Tags that will be associated with instance(s)"
   value       = module.instance_template.tags
 }
+
+output "service_account" {
+  description = "Service account object, includes email and scopes."
+  value       = module.instance_template.service_account
+}

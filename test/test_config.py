@@ -13,11 +13,10 @@ log = logging.getLogger()
 
 def test_gpu_config(cluster, lkp):
     gpu_groups = {}
-    for part_name, partition in lkp.cfg.partitions.items():
-        for group_name, group in partition.partition_nodes.items():
-            template = lkp.template_info(group.instance_template)
-            if template.gpu_count > 0:
-                gpu_groups[lkp.nodeset_prefix(group_name, part_name)] = template
+    for nodeset_name, nodeset in lkp.cfg.nodeset.items():
+        template = lkp.template_info(nodeset.instance_template)
+        if template.gpu_count > 0:
+            gpu_groups[lkp.nodeset_prefix(nodeset_name)] = template
     if not gpu_groups:
         pytest.skip("no gpu partitions found")
         return
@@ -36,11 +35,29 @@ def test_ops_agent(cluster, lkp):
     def check_ops_agent(inst):
         log.info(f"checking if ops agent is active on {inst.name}")
         ssh = cluster.ssh(inst.selfLink)
+        result = cluster.exec_cmd(ssh, f"sudo systemctl status {ops_agent_service}")
+        if "could not be found" in result.stderr:
+            pytest.skip(f"Service {ops_agent_service} is not installed.")
         result = cluster.exec_cmd(ssh, f"sudo systemctl is-active {ops_agent_service}")
         assert result.exit_status == 0
 
     lkp.instances.cache_clear()
     util.execute_with_futures(check_ops_agent, lkp.instances().values())
+
+
+def test_controller_custom_scripts(cluster):
+    check = cluster.controller_exec("ls /slurm/out/controller")
+    log.debug(f"{check.command}: {check.stdout or check.stderr}")
+    assert check.exit_status == 0
+
+
+def test_login_custom_scripts(cluster):
+    check = cluster.login_exec("ls /slurm/out/login")
+    log.debug(f"{check.command}: {check.stdout or check.stderr}")
+    assert check.exit_status == 0
+    check = cluster.login_exec("ls /slurm/out/login2")
+    log.debug(f"{check.command}: {check.stdout or check.stderr}")
+    assert check.exit_status == 0
 
 
 # def test_network_mounts(cluster):

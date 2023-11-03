@@ -39,19 +39,15 @@ locals {
     }
   ]
 
-  service_account = (
-    var.service_account != null
-    ? var.service_account
-    : {
-      email  = "default"
-      scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-    }
-  )
+  service_account = {
+    email  = coalesce(data.google_service_account.this.email, data.google_compute_default_service_account.this.email)
+    scopes = try(var.service_account.scopes, ["https://www.googleapis.com/auth/cloud-platform"])
+  }
 
   source_image_family = (
     var.source_image_family != "" && var.source_image_family != null
     ? var.source_image_family
-    : "schedmd-v5-slurm-22-05-8-hpc-centos-7"
+    : "slurm-gcp-6-1-hpc-rocky-linux-8"
   )
   source_image_project = (
     var.source_image_project != "" && var.source_image_project != null
@@ -72,11 +68,30 @@ locals {
     ? "${var.slurm_cluster_name}-${local.slurm_instance_role}-${var.name_prefix}"
     : "${var.slurm_cluster_name}-${var.name_prefix}"
   )
+
+  total_egress_bandwidth_tier = var.bandwidth_tier == "tier_1_enabled" ? "TIER_1" : "DEFAULT"
+
+  nic_type_map = {
+    platform_default = null
+    virtio_enabled   = "VIRTIO_NET"
+    gvnic_enabled    = "GVNIC"
+    tier_1_enabled   = "GVNIC"
+  }
+  nic_type = lookup(local.nic_type_map, var.bandwidth_tier, null)
 }
 
 ########
 # DATA #
 ########
+
+data "google_service_account" "this" {
+  account_id = coalesce(try(var.service_account.email, null), "NOT_SERVICE_ACCOUNT")
+  project    = var.project_id
+}
+
+data "google_compute_default_service_account" "this" {
+  project = var.project_id
+}
 
 data "local_file" "startup" {
   filename = abspath("${local.scripts_dir}/startup.sh")
@@ -87,19 +102,20 @@ data "local_file" "startup" {
 ############
 
 module "instance_template" {
-  source  = "terraform-google-modules/vm/google//modules/instance_template"
-  version = "~> 7.1"
+  source = "../_instance_template"
 
   project_id = var.project_id
 
   # Network
-  can_ip_forward     = var.can_ip_forward
-  network_ip         = var.network_ip
-  network            = var.network
-  region             = var.region
-  subnetwork_project = var.subnetwork_project
-  subnetwork         = var.subnetwork
-  tags               = var.tags
+  can_ip_forward              = var.can_ip_forward
+  network_ip                  = var.network_ip
+  network                     = var.network
+  nic_type                    = local.nic_type
+  region                      = var.region
+  subnetwork_project          = var.subnetwork_project
+  subnetwork                  = var.subnetwork
+  tags                        = var.tags
+  total_egress_bandwidth_tier = local.total_egress_bandwidth_tier
 
   # Instance
   machine_type             = var.machine_type
@@ -108,10 +124,11 @@ module "instance_template" {
   gpu                      = var.gpu
   service_account          = local.service_account
   shielded_instance_config = var.shielded_instance_config
-  threads_per_core         = var.disable_smt && length(regexall("^(t2[ad]-\\w+-\\w+|\\w+-\\w+(-1)?)$", var.machine_type)) == 0 ? 1 : null
+  threads_per_core         = var.disable_smt ? 1 : null
   enable_confidential_vm   = var.enable_confidential_vm
   enable_shielded_vm       = var.enable_shielded_vm
   preemptible              = var.preemptible
+  spot                     = var.spot
   on_host_maintenance      = var.on_host_maintenance
   labels = merge(
     var.labels,
@@ -120,6 +137,7 @@ module "instance_template" {
       slurm_instance_role = local.slurm_instance_role
     },
   )
+  instance_termination_action = var.termination_action
 
   # Metadata
   startup_script = data.local_file.startup.content
@@ -127,6 +145,7 @@ module "instance_template" {
     var.metadata,
     {
       enable-oslogin      = upper(var.enable_oslogin)
+      slurm_bucket_path   = var.slurm_bucket_path
       slurm_cluster_name  = var.slurm_cluster_name
       slurm_instance_role = local.slurm_instance_role
       VmDnsSetting        = "GlobalOnly"

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
+import argparse
 import logging
 import os
 import re
@@ -24,7 +24,6 @@ import sys
 import stat
 import time
 import socket
-from collections import defaultdict
 from concurrent.futures import as_completed
 from functools import partialmethod, lru_cache
 from itertools import chain
@@ -33,9 +32,24 @@ from pathlib import Path
 from addict import Dict as NSDict
 
 import util
-from util import run, instance_metadata, project_metadata, separate
-from util import access_secret_version
+from util import (
+    run,
+    separate,
+    blob_list,
+)
 from util import lkp, cfg, dirs, slurmdirs
+from conf import (
+    install_slurm_conf,
+    install_slurmdbd_conf,
+    gen_cloud_conf,
+    gen_cloud_gres_conf,
+    gen_topology_conf,
+    install_gres_conf,
+    install_cgroup_conf,
+    install_topology_conf,
+    install_jobsubmit_lua,
+    login_nodeset,
+)
 import slurmsync
 
 SETUP_SCRIPT = Path(__file__)
@@ -86,12 +100,6 @@ SSSSSSSSSSSS    SSS    SSSSSSSSSSSSS    SSSS        SSSS     SSSS     SSSS
 """
 
 
-FILE_PREAMBLE = """
-# Warning:
-# This file is managed by a script. Manual modifications will be overwritten.
-"""
-
-
 def start_motd():
     """advise in motd that slurm is currently configuring"""
     wall_msg = "*** Slurm is currently being configured in the background. ***"
@@ -129,381 +137,27 @@ def failed_motd():
     util.run(f"wall -n '{wall_msg}'", timeout=30)
 
 
-def dict_to_conf(conf, delim=" "):
-    """convert dict to delimited slurm-style key-value pairs"""
-
-    def filter_conf(pair):
-        k, v = pair
-        if isinstance(v, list):
-            v = ",".join(el for el in v if el is not None)
-        return k, (v if bool(v) or v == 0 else None)
-
-    return delim.join(
-        f"{k}={v}" for k, v in map(filter_conf, conf.items()) if v is not None
-    )
-
-
-def make_cloud_conf(lkp=lkp, cloud_parameters=None):
-    """generate cloud.conf snippet"""
-    if cloud_parameters is None:
-        cloud_parameters = lkp.cfg.cloud_parameters
-
-    any_gpus = any(
-        lkp.template_info(node.instance_template).gpu_count > 0
-        for part in cfg.partitions.values()
-        for node in part.partition_nodes.values()
-    )
-
-    def conflines(cloud_parameters):
-        scripts_dir = lkp.cfg.get("install_dir", dirs.scripts)
-        no_comma_params = cloud_parameters.get("no_comma_params", False)
-        comma_params = {
-            "PrivateData": [
-                "cloud",
-            ],
-            "LaunchParameters": [
-                "enable_nss_slurm",
-                "use_interactive_step",
-            ],
-            "SlurmctldParameters": [
-                "cloud_dns",
-                "enable_configless",
-                "idle_on_node_suspend",
-            ],
-            "SchedulerParameters": [
-                "salloc_wait_nodes",
-            ],
-            "CommunicationParameters": [
-                "NoAddrCache",
-            ],
-            "GresTypes": [
-                "gpu" if any_gpus else None,
-            ],
-        }
-        prolog_path = Path(dirs.custom_scripts / "prolog.d")
-        epilog_path = Path(dirs.custom_scripts / "epilog.d")
-        any_exclusive = any(
-            bool(p.enable_job_exclusive) for p in lkp.cfg.partitions.values()
-        )
-        conf_options = {
-            **(comma_params if not no_comma_params else {}),
-            "Prolog": f"{prolog_path}/*" if lkp.cfg.prolog_scripts else None,
-            "Epilog": f"{epilog_path}/*" if lkp.cfg.epilog_scripts else None,
-            "PrologSlurmctld": f"{scripts_dir}/resume.py" if any_exclusive else None,
-            "EpilogSlurmctld": f"{scripts_dir}/suspend.py" if any_exclusive else None,
-            "SuspendProgram": f"{scripts_dir}/suspend.py",
-            "ResumeProgram": f"{scripts_dir}/resume.py",
-            "ResumeFailProgram": f"{scripts_dir}/suspend.py",
-            "ResumeRate": cloud_parameters.get("resume_rate", 0),
-            "ResumeTimeout": cloud_parameters.get("resume_timeout", 300),
-            "SuspendRate": cloud_parameters.get("suspend_rate", 0),
-            "SuspendTimeout": cloud_parameters.get("suspend_timeout", 300),
-        }
-        return dict_to_conf(conf_options, delim="\n")
-
-    def node_group_lines(node_group, part_name):
-        template_info = lkp.template_info(node_group.instance_template)
-        machine_conf = lkp.template_machine_conf(node_group.instance_template)
-
-        node_def = dict_to_conf(
-            {
-                "NodeName": "DEFAULT",
-                "State": "UNKNOWN",
-                "RealMemory": machine_conf.memory,
-                "Boards": machine_conf.boards,
-                "Sockets": machine_conf.sockets,
-                "CoresPerSocket": machine_conf.cores_per_socket,
-                "ThreadsPerCore": machine_conf.threads_per_core,
-                "CPUs": machine_conf.cpus,
-                **node_group.node_conf,
-            }
-        )
-
-        gres = None
-        if template_info.gpu_count:
-            gres = f"gpu:{template_info.gpu_count}"
-
-        lines = [node_def]
-        static, dynamic = lkp.nodeset_lists(node_group, part_name)
-        nodeset = lkp.nodeset_prefix(node_group.group_name, part_name)
-        if static:
-            lines.append(
-                dict_to_conf(
-                    {
-                        "NodeName": static,
-                        "State": "CLOUD",
-                        "Gres": gres,
-                    }
-                )
-            )
-        if dynamic:
-            lines.append(
-                dict_to_conf(
-                    {
-                        "NodeName": dynamic,
-                        "State": "CLOUD",
-                        "Gres": gres,
-                    }
-                )
-            )
-        lines.append(
-            dict_to_conf(
-                {"NodeSet": nodeset, "Nodes": ",".join(filter(None, (static, dynamic)))}
-            )
-        )
-
-        return (nodeset, "\n".join(filter(None, lines)))
-
-    def partitionlines(partition):
-        """Make a partition line for the slurm.conf"""
-        part_name = partition.partition_name
-        group_lines = [
-            node_group_lines(group, part_name)
-            for group in partition.partition_nodes.values()
-        ]
-        nodesets, nodelines = zip(*group_lines)
-
-        def defmempercpu(template_link):
-            machine_conf = lkp.template_machine_conf(template_link)
-            return max(100, machine_conf.memory // machine_conf.cpus)
-
-        defmem = min(
-            defmempercpu(node.instance_template)
-            for node in partition.partition_nodes.values()
-        )
-        line_elements = {
-            "PartitionName": part_name,
-            "Nodes": ",".join(nodesets),
-            "State": "UP",
-            "DefMemPerCPU": defmem,
-            "SuspendTime": 300,
-            "Oversubscribe": "Exclusive" if partition.enable_job_exclusive else None,
-            **partition.partition_conf,
-        }
-        lines = [
-            *nodelines,
-            dict_to_conf(line_elements),
-        ]
-        return "\n".join(lines)
-
-    static_nodes = ",".join(lkp.static_nodelist())
-    suspend_exc = (
-        dict_to_conf(
-            {
-                "SuspendExcNodes": static_nodes,
-            }
-        )
-        if static_nodes
-        else None
-    )
-
-    lines = [
-        FILE_PREAMBLE,
-        conflines(cloud_parameters),
-        *(partitionlines(p) for p in lkp.cfg.partitions.values()),
-        suspend_exc,
-        "\n",
-    ]
-    return "\n\n".join(filter(None, lines))
-
-
-def gen_cloud_conf(lkp=lkp, cloud_parameters=None):
-    content = make_cloud_conf(lkp, cloud_parameters=cloud_parameters)
-
-    conf_file = Path(lkp.cfg.output_dir or slurmdirs.etc) / "cloud.conf"
-    conf_file.write_text(content)
-    util.chown_slurm(conf_file, mode=0o644)
-
-
-def install_slurm_conf(lkp):
-    """install slurm.conf"""
-    if lkp.cfg.ompi_version:
-        mpi_default = "pmi2"
-    else:
-        mpi_default = "none"
-
-    conf_options = {
-        "name": lkp.cfg.slurm_cluster_name,
-        "control_addr": lkp.control_addr if lkp.control_addr else lkp.hostname_fqdn,
-        "control_host": lkp.control_host,
-        "control_host_port": lkp.control_host_port,
-        "scripts": dirs.scripts,
-        "slurmlog": dirs.log,
-        "state_save": slurmdirs.state,
-        "mpi_default": mpi_default,
-    }
-    conf_resp = project_metadata(f"{cfg.slurm_cluster_name}-slurm-tpl-slurm-conf")
-    conf = conf_resp.format(**conf_options)
-
-    conf_file = Path(lkp.cfg.output_dir or slurmdirs.etc) / "slurm.conf"
-    conf_file.write_text(conf)
-    util.chown_slurm(conf_file, mode=0o644)
-
-
-def install_slurmdbd_conf(lkp):
-    """install slurmdbd.conf"""
-    conf_options = NSDict(
-        {
-            "control_host": lkp.control_host,
-            "slurmlog": dirs.log,
-            "state_save": slurmdirs.state,
-            "db_name": "slurm_acct_db",
-            "db_user": "slurm",
-            "db_pass": '""',
-            "db_host": "localhost",
-            "db_port": "3306",
-        }
-    )
-    if lkp.cfg.cloudsql:
-        secret_name = f"{cfg.slurm_cluster_name}-slurm-secret-cloudsql"
-        payload = json.loads(access_secret_version(util.project, secret_name))
-
-        if payload["db_name"] and payload["db_name"] != "":
-            conf_options.db_name = payload["db_name"]
-        if payload["user"] and payload["user"] != "":
-            conf_options.db_user = payload["user"]
-        if payload["password"] and payload["password"] != "":
-            conf_options.db_pass = payload["password"]
-
-        db_host_str = payload["server_ip"].split(":")
-        if db_host_str[0] and db_host_str[0] != "":
-            conf_options.db_host = db_host_str[0]
-            conf_options.db_port = db_host_str[1] if len(db_host_str) >= 2 else "3306"
-
-    conf_resp = project_metadata(f"{cfg.slurm_cluster_name}-slurm-tpl-slurmdbd-conf")
-    conf = conf_resp.format(**conf_options)
-
-    conf_file = Path(lkp.cfg.output_dir or slurmdirs.etc) / "slurmdbd.conf"
-    conf_file.write_text(conf)
-    util.chown_slurm(conf_file, 0o600)
-
-
-def install_cgroup_conf():
-    """install cgroup.conf"""
-    conf = project_metadata(f"{cfg.slurm_cluster_name}-slurm-tpl-cgroup-conf")
-
-    conf_file = Path(lkp.cfg.output_dir or slurmdirs.etc) / "cgroup.conf"
-    conf_file.write_text(conf)
-    util.chown_slurm(conf_file, mode=0o600)
-
-
-def gen_cloud_gres_conf(lkp=lkp):
-    """generate cloud_gres.conf"""
-
-    gpu_nodes = defaultdict(list)
-    for part_name, partition in lkp.cfg.partitions.items():
-        for node in partition.partition_nodes.values():
-            template_info = lkp.template_info(node.instance_template)
-            gpu_count = template_info.gpu_count
-            if gpu_count == 0:
-                continue
-            gpu_nodes[gpu_count].extend(
-                filter(None, lkp.nodeset_lists(node, part_name))
-            )
-
-    lines = [
-        dict_to_conf(
-            {
-                "NodeName": names,
-                "Name": "gpu",
-                "File": "/dev/nvidia{}".format(f"[0-{i-1}]" if i > 1 else "0"),
-            }
-        )
-        for i, names in gpu_nodes.items()
-    ]
-    lines.append("\n")
-    content = FILE_PREAMBLE + "\n".join(lines)
-
-    conf_file = Path(lkp.cfg.output_dir or slurmdirs.etc) / "cloud_gres.conf"
-    conf_file.write_text(content)
-    util.chown_slurm(conf_file, mode=0o600)
-
-
-def install_gres_conf():
-    conf_file = Path(lkp.cfg.output_dir or slurmdirs.etc) / "cloud_gres.conf"
-    gres_conf = Path(lkp.cfg.output_dir or slurmdirs.etc) / "gres.conf"
-    if not gres_conf.exists():
-        gres_conf.symlink_to(conf_file)
-    util.chown_slurm(gres_conf, mode=0o600)
-
-
-def fetch_devel_scripts():
-    """download scripts from project metadata if they are present"""
-
-    meta_json = project_metadata(f"{cfg.slurm_cluster_name}-slurm-devel")
-    if not meta_json:
-        return
-    metadata_devel = json.loads(meta_json)
-
-    meta_entries = [
-        ("slurmeventd.py", "slurmeventd"),
-        ("resume.py", "slurm-resume"),
-        ("slurmsync.py", "slurmsync"),
-        ("util.py", "util-script"),
-        ("setup.py", "setup-script"),
-        ("startup.sh", "startup-script"),
-        ("load_bq.py", "loadbq"),
-    ]
-
-    for script, name in meta_entries:
-        if name not in metadata_devel:
-            log.debug(f"{name} not found in project metadata, not updating")
-            continue
-        log.info(f"updating {script} from metadata")
-        content = metadata_devel[name]
-        path = (dirs.scripts / script).resolve()
-        # make sure parent dir exists
-        path.write_text(content)
-        util.chown_slurm(path, mode=0o755)
-
-
 def install_custom_scripts(clean=False):
-    """download custom scripts from project metadata"""
-    script_pattern = re.compile(
-        rf"{cfg.slurm_cluster_name}-slurm-(?P<path>\S+)-script-(?P<name>\S+)"
+    """download custom scripts from gcs bucket"""
+
+    compute_tokens = ["compute", "prolog", "epilog"]
+    if lkp.instance_role == "compute":
+        try:
+            compute_tokens.append(f"partition-{lkp.node_partition_name()}")
+        except Exception as e:
+            log.error(f"Failed to lookup node partition: {e}")
+
+    prefix_tokens = dict.get(
+        {
+            "login": ["login"],
+            "compute": compute_tokens,
+            "controller": ["controller", "prolog", "epilog"],
+        },
+        lkp.instance_role,
+        [],
     )
-    metadata_keys = project_metadata("/").splitlines()
-
-    def match_name(meta_key):
-        m = script_pattern.match(meta_key)
-        if not m:
-            # key does not match, skip
-            return None
-        # returned path is `partition.d/<part_name>/<name>`
-        # or `<controller/compute>.d/<name>`
-        parts = m["path"].split("-")
-        parts[0] += ".d"
-        name, _, ext = m["name"].rpartition("_")
-        name = ".".join((name, ext))
-        return meta_key, Path(*parts, name)
-
-    def filter_role(meta_entry):
-        if not meta_entry:
-            return False
-        key, path = meta_entry
-        # path is <role>.d/script.sh or partition.d/<part>/script.sh
-        # role is <role> or 'partition', part is None or <part>
-        role, part, *_ = chain(path.parent.parts, (None,))
-        role = role[:-2]  # strip off added '.d'
-
-        # login only needs their login scripts
-        if lkp.instance_role == "login":
-            suffix = instance_metadata("attributes/slurm_login_suffix")
-            script_types = [f"login_{suffix}"]
-            return role in script_types
-        # compute needs compute, prolog, epilog, and the matching partition
-        if lkp.instance_role == "compute":
-            script_types = ["compute", "prolog", "epilog"]
-            return role in script_types or (part and part == lkp.node_partition_name())
-        # controller downloads them all for good measure
-        return True
-
-    custom_scripts = list(filter(filter_role, map(match_name, metadata_keys)))
-    log.info(
-        "installing custom scripts: {}".format(
-            ",".join(str(path) for key, path in custom_scripts)
-        )
-    )
+    prefixes = [f"slurm-{tok}-script" for tok in prefix_tokens]
+    blobs = list(chain.from_iterable(blob_list(prefix=p) for p in prefixes))
 
     if clean:
         path = Path(dirs.custom_scripts)
@@ -511,15 +165,25 @@ def install_custom_scripts(clean=False):
             # rm -rf custom_scripts
             shutil.rmtree(path)
 
-    dirs.custom_scripts.mkdirp()
-    for key, path in custom_scripts:
+    script_pattern = re.compile(r"slurm-(?P<path>\S+)-script-(?P<name>\S+)")
+    for blob in blobs:
+        m = script_pattern.match(Path(blob.name).name)
+        if not m:
+            log.warning(f"found blob that doesn't match expected pattern: {blob.name}")
+            continue
+        path_parts = m["path"].split("-")
+        path_parts[0] += ".d"
+        stem, _, ext = m["name"].rpartition("_")
+        filename = ".".join((stem, ext))
+
+        path = Path(*path_parts, filename)
         fullpath = (dirs.custom_scripts / path).resolve()
+        log.info(f"installing custom script: {path} from {blob.name}")
         fullpath.parent.mkdirp()
         for par in path.parents:
             util.chown_slurm(dirs.custom_scripts / par)
-        log.debug(path)
-        content = project_metadata(key)
-        fullpath.write_text(content)
+        with fullpath.open("wb") as f:
+            blob.download_to_file(f)
         util.chown_slurm(fullpath, mode=0o755)
 
 
@@ -533,9 +197,8 @@ def run_custom_scripts():
         # compute setup with compute.d and partition.d
         custom_dirs = [custom_dir / "compute.d", custom_dir / "partition.d"]
     elif lkp.instance_role == "login":
-        # login setup with only login_{suffix}.d
-        suffix = instance_metadata("attributes/slurm_login_suffix")
-        custom_dirs = [custom_dir / f"login_{suffix}.d"]
+        # login setup with only login.d
+        custom_dirs = [custom_dir / "login.d"]
     else:
         # Unknown role: run nothing
         custom_dirs = []
@@ -556,10 +219,6 @@ def run_custom_scripts():
                 timeout = lkp.cfg.get("compute_startup_scripts_timeout", 300)
             elif "/login.d/" in str(script):
                 timeout = lkp.cfg.get("login_startup_scripts_timeout", 300)
-            elif "/partition.d/" in str(script):
-                partition_name = lkp.node_partition_name()
-                partition = cfg.partitions[partition_name] if partition_name else None
-                timeout = partition.get("partition_startup_scripts_timeout", 300)
             else:
                 timeout = 300
             timeout = None if not timeout or timeout < 0 else timeout
@@ -595,7 +254,11 @@ def resolve_network_storage(partition_name=None):
     """Combine appropriate network_storage fields to a single list"""
 
     if lkp.instance_role == "compute":
-        partition_name = lkp.node_partition_name()
+        try:
+            partition_name = lkp.node_partition_name()
+        except Exception:
+            # External nodename, skip partition lookup
+            partition_name = None
     partition = cfg.partitions[partition_name] if partition_name else None
 
     default_mounts = (
@@ -663,7 +326,7 @@ def setup_network_storage():
         local_mount = Path(mount.local_mount)
         remote_mount = mount.remote_mount
         fs_type = mount.fs_type
-        server_ip = mount.server_ip
+        server_ip = mount.server_ip or ""
         local_mount.mkdirp()
 
         log.info(
@@ -715,7 +378,6 @@ def mount_fstab(mounts):
     from more_executors import Executors, ExceptionRetryPolicy
 
     def mount_path(path):
-
         log.info(f"Waiting for '{path}' to be mounted...")
         try:
             run(f"mount {path}", timeout=120)
@@ -754,7 +416,7 @@ def munge_mount_handler():
     mount = cfg.munge_mount
     server_ip = (
         mount.server_ip
-        if mount.server_ip is not None
+        if mount.server_ip
         else (cfg.slurm_control_addr or cfg.slurm_control_host)
     )
     remote_mount = mount.remote_mount
@@ -779,7 +441,6 @@ def munge_mount_handler():
             server_ip,
             str(local_mount),
         ]
-        run(cmd, timeout=120)
     else:
         if remote_mount is None:
             remote_mount = Path("/etc/munge")
@@ -790,7 +451,21 @@ def munge_mount_handler():
             f"{server_ip}:{remote_mount}",
             str(local_mount),
         ]
-        run(cmd, timeout=120)
+    # wait max 120s for munge mount
+    timeout = 120
+    for retry, wait in enumerate(util.backoff_delay(0.5, timeout), 1):
+        try:
+            run(cmd, timeout=timeout)
+            break
+        except Exception as e:
+            log.error(
+                f"munge mount failed: '{cmd}' {e}, try {retry}, waiting {wait:0.2f}s"
+            )
+            time.sleep(wait)
+            err = e
+            continue
+    else:
+        raise err
 
     log.info(f"Copy munge.key from: {local_mount}")
     shutil.copy2(Path(local_mount / "munge.key"), munge_key)
@@ -812,21 +487,21 @@ def setup_nfs_exports():
     # The controller only needs to set up exports for cluster-internal mounts
     # switch the key to remote mount path since that is what needs exporting
     mounts = resolve_network_storage()
-    # controller mounts
-    _, con_mounts = partition_mounts(mounts)
-    con_mounts = {m.remote_mount: m for m in con_mounts}
     # manually add munge_mount
-    con_mounts.update(
-        {
-            dirs.munge: {
+    mounts.append(
+        NSDict(
+            {
                 "server_ip": cfg.munge_mount.server_ip,
                 "remote_mount": cfg.munge_mount.remote_mount,
                 "local_mount": Path(f"{dirs.munge}_tmp"),
                 "fs_type": cfg.munge_mount.fs_type,
                 "mount_options": cfg.munge_mount.mount_options,
             }
-        }
+        )
     )
+    # controller mounts
+    _, con_mounts = partition_mounts(mounts)
+    con_mounts = {m.remote_mount: m for m in con_mounts}
     for part in cfg.partitions:
         # get internal mounts for each partition by calling
         # prepare_network_mounts as from a node in each partition
@@ -861,11 +536,6 @@ def setup_secondary_disks():
                 dirs.secdisk
             )
         )
-
-
-def setup_sync_cronjob():
-    """Create cronjob for running slurmsync.py"""
-    run("crontab -u slurm -", input=(f"*/1 * * * * {dirs.scripts}/slurmsync.py\n"))
 
 
 def setup_jwt_key():
@@ -921,6 +591,17 @@ def setup_nss_slurm():
     run(r"sed -i 's/\(^\(passwd\|group\):\s\+\)/\1slurm /g' /etc/nsswitch.conf")
 
 
+def setup_sudoers():
+    content = """
+# Allow SlurmUser to manage the slurm daemons
+slurm ALL= NOPASSWD: /usr/bin/systemctl restart slurmd.service
+slurm ALL= NOPASSWD: /usr/bin/systemctl restart slurmctld.service
+"""
+    sudoers_file = Path("/etc/sudoers.d/slurm")
+    sudoers_file.write_text(content)
+    sudoers_file.chmod(0o0440)
+
+
 def update_system_config(file, content):
     """Add system defaults options for service files"""
     sysconfig = Path("/etc/sysconfig")
@@ -974,7 +655,6 @@ innodb_lock_wait_timeout=900
 
 
 def configure_dirs():
-
     for p in dirs.values():
         p.mkdirp()
     util.chown_slurm(dirs.slurm)
@@ -1000,7 +680,7 @@ def configure_dirs():
     scripts_log.symlink_to(dirs.log)
 
 
-def setup_controller():
+def setup_controller(args):
     """Run controller setup"""
     log.info("Setting up controller")
     util.chown_slurm(dirs.scripts / "config.yaml", mode=0o600)
@@ -1011,11 +691,15 @@ def setup_controller():
 
     gen_cloud_conf()
     gen_cloud_gres_conf()
+    gen_topology_conf()
     install_gres_conf()
     install_cgroup_conf()
+    install_topology_conf()
+    install_jobsubmit_lua()
 
     setup_jwt_key()
     setup_munge_key()
+    setup_sudoers()
 
     if cfg.controller_secondary_disk:
         setup_secondary_disks()
@@ -1023,7 +707,7 @@ def setup_controller():
 
     run_custom_scripts()
 
-    if not cfg.cloudsql:
+    if not cfg.cloudsql_secret:
         configure_mysql()
 
     run("systemctl enable slurmdbd", timeout=30)
@@ -1051,18 +735,14 @@ def setup_controller():
     run("systemctl enable nfs-server", timeout=30)
     run("systemctl start nfs-server", timeout=30)
 
-    run("systemctl enable slurmeventd", timeout=30)
-    run("systemctl restart slurmeventd", timeout=30)
-
     setup_nfs_exports()
-    setup_sync_cronjob()
+    run("systemctl enable --now slurmcmd.timer", timeout=30)
 
     log.info("Check status of cluster services")
     run("systemctl status munge", timeout=30)
     run("systemctl status slurmdbd", timeout=30)
     run("systemctl status slurmctld", timeout=30)
     run("systemctl status slurmrestd", timeout=30)
-    run("systemctl status slurmeventd", timeout=30)
 
     slurmsync.sync_slurm()
     run("systemctl enable slurm_load_bq.timer", timeout=30)
@@ -1073,7 +753,7 @@ def setup_controller():
     pass
 
 
-def setup_login():
+def setup_login(args):
     """run login node setup"""
     log.info("Setting up login")
     slurmctld_host = f"{lkp.control_host}"
@@ -1082,6 +762,7 @@ def setup_login():
     slurmd_options = [
         f"-N {lkp.hostname}",
         f'--conf-server="{slurmctld_host}:{lkp.control_host_port}"',
+        f'--conf="Feature={login_nodeset}"',
         "-Z",
     ]
     sysconf = f"""SLURMD_OPTIONS='{" ".join(slurmd_options)}'"""
@@ -1090,9 +771,11 @@ def setup_login():
 
     setup_network_storage()
     setup_slurmd_cronjob()
+    setup_sudoers()
     run("systemctl restart munge")
     run("systemctl enable slurmd", timeout=30)
     run("systemctl restart slurmd", timeout=30)
+    run("systemctl enable --now slurmcmd.timer", timeout=30)
 
     run_custom_scripts()
 
@@ -1103,7 +786,7 @@ def setup_login():
     log.info("Done setting up login")
 
 
-def setup_compute():
+def setup_compute(args):
     """run compute node setup"""
     log.info("Setting up compute")
     util.chown_slurm(dirs.scripts / "config.yaml", mode=0o600)
@@ -1114,6 +797,9 @@ def setup_compute():
         f"-N {lkp.hostname}",
         f'--conf-server="{slurmctld_host}:{lkp.control_host_port}"',
     ]
+    if args.slurmd_feature is not None:
+        slurmd_options.append(f'--conf="Feature={args.slurmd_feature}"')
+        slurmd_options.append("-Z")
     sysconf = f"""SLURMD_OPTIONS='{" ".join(slurmd_options)}'"""
     update_system_config("slurmd", sysconf)
     install_custom_scripts()
@@ -1128,26 +814,22 @@ def setup_compute():
     run_custom_scripts()
 
     setup_slurmd_cronjob()
+    setup_sudoers()
     run("systemctl restart munge", timeout=30)
     run("systemctl enable slurmd", timeout=30)
     run("systemctl restart slurmd", timeout=30)
-
-    run("systemctl enable slurmeventd", timeout=30)
-    run("systemctl restart slurmeventd", timeout=30)
+    run("systemctl enable --now slurmcmd.timer", timeout=30)
 
     log.info("Check status of cluster services")
     run("systemctl status munge", timeout=30)
     run("systemctl status slurmd", timeout=30)
-    run("systemctl status slurmeventd", timeout=30)
 
     log.info("Done setting up compute")
 
 
-def main():
-
+def main(args):
     start_motd()
     configure_dirs()
-    fetch_devel_scripts()
 
     # call the setup function for the instance type
     setup = dict.get(
@@ -1159,20 +841,31 @@ def main():
         lkp.instance_role,
         lambda: log.fatal(f"Unknown node role: {lkp.instance_role}"),
     )
-    setup()
+    setup(args)
 
     end_motd()
 
 
 if __name__ == "__main__":
     util.chown_slurm(LOGFILE, mode=0o600)
+
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--slurmd-feature",
+        dest="slurmd_feature",
+        help="Feature for slurmd to register with. Controller ignores this option.",
+    )
+    args = parser.parse_args()
+
     util.config_root_logger(filename, logfile=LOGFILE)
     sys.excepthook = util.handle_exception
 
     lkp = util.Lookup(cfg)  # noqa F811
 
     try:
-        main()
+        main(args)
     except subprocess.TimeoutExpired as e:
         log.error(
             f"""TimeoutExpired:

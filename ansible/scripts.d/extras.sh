@@ -23,5 +23,5 @@ python2 get-pip.py
 rm get-pip.py
 
 pip3 install --upgrade requests
+pip3 install --upgrade --extra-index-url  https://us-central1-python.pkg.dev/conception-cluster/conception-python-library/simple conception-python-library
 
-pip3 install --index-url --upgrade https://us-central1-python.pkg.dev/conception-cluster/conception-python-library/simple conception-python-library

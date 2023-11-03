@@ -24,13 +24,17 @@ zone       = "us-central1-a"
 #########
 
 # NOTE: Your Project ID will be automatically appended
-source_image_project_id = [
-  # "rhel-cloud",
-  # "centos-cloud",
-  # "cloud-hpc-image-public",
-  "debian-cloud",
-  "ubuntu-os-cloud",
-]
+# source_image_project_id = [
+#   # "rhel-cloud",
+#   # "centos-cloud",
+#   # "cloud-hpc-image-public",
+#   "debian-cloud",
+#   "ubuntu-os-cloud",
+# ]
+
+source_image_project_id = "ubuntu-os-cloud"
+source_image_family = "ubuntu-2004-lts"
+
 
 # *NOT* intended for production use
 # skip_create_image = true
@@ -56,7 +60,7 @@ tags = [
 # PROVISION #
 #############
 
-slurm_version = "22.05.8"
+# slurm_version = "22.05.8"
 
 # Disable some ansible roles here; they are enabled by default
 install_cuda = false
@@ -72,7 +76,7 @@ prefix = "conception"
 
 ### Service Account ###
 
-service_account_email = "default"
+service_account_email = "packer@conception-automation.iam.gserviceaccount.com"
 
 service_account_scopes = [
   "https://www.googleapis.com/auth/cloud-platform",

@@ -62,13 +62,24 @@ variable "static_ips" {
   default     = []
 }
 
-variable "access_config" {
-  description = "Access configurations, i.e. IPs via which the VM instance can be accessed via the Internet."
-  type = list(object({
-    nat_ip       = string
-    network_tier = string
-  }))
-  default = []
+variable "enable_public_ip" {
+  description = "Enables IP address to access the Internet."
+  type        = bool
+  default     = false
+}
+
+variable "network_tier" {
+  type        = string
+  description = <<-EOD
+    The networking tier used for configuring this instance. This field can take the following values: PREMIUM, FIXED_STANDARD or STANDARD.
+    Ignored if enable_public_ip is false.
+  EOD
+  default     = "STANDARD"
+
+  validation {
+    condition     = var.network_tier == null ? true : contains(["PREMIUM", "FIXED_STANDARD", "STANDARD"], var.network_tier)
+    error_message = "Allow values are: 'PREMIUM', 'FIXED_STANDARD', 'STANDARD'."
+  }
 }
 
 variable "zone" {
@@ -100,12 +111,6 @@ variable "slurm_cluster_name" {
   }
 }
 
-variable "enable_devel" {
-  type        = bool
-  description = "Enables development mode. Not for production use."
-  default     = false
-}
-
 variable "enable_cleanup_compute" {
   description = <<EOD
 Enables automatic cleanup of compute nodes and resource policies (e.g.
@@ -118,62 +123,6 @@ may be destroyed and their jobs will be requeued.
 EOD
   type        = bool
   default     = false
-}
-
-variable "enable_cleanup_subscriptions" {
-  description = <<EOD
-Enables automatic cleanup of pub/sub subscriptions managed by this module, when
-cluster is destroyed.
-
-NOTE: Requires Python and script dependencies.
-
-*WARNING*: Toggling this may temporarily impact var.enable_reconfigure behavior.
-EOD
-  type        = bool
-  default     = false
-}
-
-variable "enable_reconfigure" {
-  description = <<EOD
-Enables automatic Slurm reconfigure on when Slurm configuration changes (e.g.
-slurm.conf.tpl, partition details). Compute instances and resource policies
-(e.g. placement groups) will be destroyed to align with new configuration.
-
-NOTE: Requires Python and Google Pub/Sub API.
-
-*WARNING*: Toggling this will impact the running workload. Deployed compute nodes
-will be destroyed and their jobs will be requeued.
-EOD
-  type        = bool
-  default     = false
-}
-
-variable "enable_bigquery_load" {
-  description = <<EOD
-Enables loading of cluster job usage into big query.
-
-NOTE: Requires Google Bigquery API.
-EOD
-  type        = bool
-  default     = false
-}
-
-variable "slurmdbd_conf_tpl" {
-  type        = string
-  description = "Slurm slurmdbd.conf template file path."
-  default     = null
-}
-
-variable "slurm_conf_tpl" {
-  type        = string
-  description = "Slurm slurm.conf template file path."
-  default     = null
-}
-
-variable "cgroup_conf_tpl" {
-  type        = string
-  description = "Slurm cgroup.conf template file path."
-  default     = null
 }
 
 variable "cloudsql" {
@@ -192,212 +141,4 @@ EOD
   })
   default   = null
   sensitive = true
-}
-
-variable "login_startup_scripts_timeout" {
-  description = <<EOD
-The timeout (seconds) applied to each script in login_startup_scripts. If
-any script exceeds this timeout, then the instance setup process is considered
-failed and handled accordingly.
-
-NOTE: When set to 0, the timeout is considered infinite and thus disabled.
-EOD
-  type        = number
-  default     = 300
-}
-
-variable "controller_startup_scripts" {
-  description = "List of scripts to be ran on controller VM startup."
-  type = list(object({
-    filename = string
-    content  = string
-  }))
-  default = []
-}
-
-variable "controller_startup_scripts_timeout" {
-  description = <<EOD
-The timeout (seconds) applied to each script in controller_startup_scripts. If
-any script exceeds this timeout, then the instance setup process is considered
-failed and handled accordingly.
-
-NOTE: When set to 0, the timeout is considered infinite and thus disabled.
-EOD
-  type        = number
-  default     = 300
-}
-
-variable "compute_startup_scripts" {
-  description = "List of scripts to be ran on compute VM startup."
-  type = list(object({
-    filename = string
-    content  = string
-  }))
-  default = []
-}
-
-variable "compute_startup_scripts_timeout" {
-  description = <<EOD
-The timeout (seconds) applied to each script in compute_startup_scripts. If
-any script exceeds this timeout, then the instance setup process is considered
-failed and handled accordingly.
-
-NOTE: When set to 0, the timeout is considered infinite and thus disabled.
-EOD
-  type        = number
-  default     = 300
-}
-
-variable "prolog_scripts" {
-  description = <<EOD
-List of scripts to be used for Prolog. Programs for the slurmd to execute
-whenever it is asked to run a job step from a new job allocation.
-See https://slurm.schedmd.com/slurm.conf.html#OPT_Prolog.
-EOD
-  type = list(object({
-    filename = string
-    content  = string
-  }))
-  default = []
-}
-
-variable "epilog_scripts" {
-  description = <<EOD
-List of scripts to be used for Epilog. Programs for the slurmd to execute
-on every node when a user's job completes.
-See https://slurm.schedmd.com/slurm.conf.html#OPT_Epilog.
-EOD
-  type = list(object({
-    filename = string
-    content  = string
-  }))
-  default = []
-}
-
-variable "disable_default_mounts" {
-  description = <<-EOD
-    Disable default global network storage from the controller
-    * /usr/local/etc/slurm
-    * /etc/munge
-    * /home
-    * /apps
-    If these are disabled, the slurm etc and munge dirs must be added manually,
-    or some other mechanism must be used to synchronize the slurm conf files
-    and the munge key across the cluster.
-    EOD
-  type        = bool
-  default     = false
-}
-
-variable "network_storage" {
-  description = <<EOD
-Storage to mounted on all instances.
-* server_ip     : Address of the storage server.
-* remote_mount  : The location in the remote instance filesystem to mount from.
-* local_mount   : The location on the instance filesystem to mount to.
-* fs_type       : Filesystem type (e.g. "nfs").
-* mount_options : Options to mount with.
-EOD
-  type = list(object({
-    server_ip     = string
-    remote_mount  = string
-    local_mount   = string
-    fs_type       = string
-    mount_options = string
-  }))
-  default = []
-}
-
-variable "login_network_storage" {
-  description = <<EOD
-Storage to mounted on login and controller instances
-* server_ip     : Address of the storage server.
-* remote_mount  : The location in the remote instance filesystem to mount from.
-* local_mount   : The location on the instance filesystem to mount to.
-* fs_type       : Filesystem type (e.g. "nfs").
-* mount_options : Options to mount with.
-EOD
-  type = list(object({
-    server_ip     = string
-    remote_mount  = string
-    local_mount   = string
-    fs_type       = string
-    mount_options = string
-  }))
-  default = []
-}
-
-variable "partitions" {
-  description = "Cluster partitions as a list."
-  type = list(object({
-    compute_list = list(string)
-    partition = object({
-      enable_job_exclusive    = bool
-      enable_placement_groups = bool
-      network_storage = list(object({
-        server_ip     = string
-        remote_mount  = string
-        local_mount   = string
-        fs_type       = string
-        mount_options = string
-      }))
-      partition_conf = map(string)
-      partition_name = string
-      partition_nodes = map(object({
-        access_config = list(object({
-          network_tier = string
-        }))
-        bandwidth_tier         = string
-        node_count_dynamic_max = number
-        node_count_static      = number
-        enable_spot_vm         = bool
-        group_name             = string
-        instance_template      = string
-        node_conf              = map(string)
-        spot_instance_config = object({
-          termination_action = string
-        })
-      }))
-      partition_startup_scripts_timeout = number
-      subnetwork                        = string
-      zone_target_shape                 = string
-      zone_policy_allow                 = list(string)
-      zone_policy_deny                  = list(string)
-    })
-  }))
-  default = []
-
-  validation {
-    condition = alltrue([
-      for x in var.partitions[*].partition : can(regex("^[a-z](?:[a-z0-9]*)$", x.partition_name))
-    ])
-    error_message = "Items 'partition_name' must be a match of regex '^[a-z](?:[a-z0-9]*)$'."
-  }
-}
-
-variable "cloud_parameters" {
-  description = "cloud.conf options."
-  type = object({
-    resume_rate     = number
-    resume_timeout  = number
-    suspend_rate    = number
-    suspend_timeout = number
-  })
-  default = {
-    resume_rate     = 0
-    resume_timeout  = 300
-    suspend_rate    = 0
-    suspend_timeout = 300
-  }
-}
-
-variable "slurm_depends_on" {
-  description = <<EOD
-Custom terraform dependencies without replacement on delta. This is useful to
-ensure order of resource creation.
-
-NOTE: Also see terraform meta-argument 'depends_on'.
-EOD
-  type        = list(string)
-  default     = []
 }
