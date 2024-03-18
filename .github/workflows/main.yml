@@ -23,7 +23,7 @@ jobs:
       
       - name: Run `packer init`
         id: init
-        run: cd packer && packer init ./packer/main.pkr.hcl
+        run: packer init ./packer/
 
       - name: Build artifact
         run: cd packer && packer build -color=false -var-file=conception.pkrvars.hcl .
