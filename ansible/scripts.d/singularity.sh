@@ -13,8 +13,8 @@ apt-get update && apt-get install -y \
     cryptsetup \
     runc
 
-export GOLANG_VERSION=1.20.5
-export SINGULARITY_VERSION=3.11.4
+export GOLANG_VERSION=1.21.7
+export SINGULARITY_VERSION=4.1.2
 
 mkdir -p /opt/go/${GOLANG_VERSION}
 mkdir -p /opt/singularity/${SINGULARITY_VERSION}
