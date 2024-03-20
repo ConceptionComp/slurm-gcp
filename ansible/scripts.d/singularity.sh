@@ -8,6 +8,7 @@ apt-get update && apt-get install -y \
     uuid-dev \
     libgpgme11-dev \
     squashfs-tools \
+    libuuid-devel \
     libseccomp-dev \
     pkg-config \
     cryptsetup \
