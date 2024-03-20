@@ -12,3 +12,4 @@ sinto
 keyring
 keyrings.google-artifactregistry-auth
 pyega3
+pyopenssl
