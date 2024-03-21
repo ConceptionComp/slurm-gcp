@@ -7,12 +7,15 @@ apt-get update && apt-get install -y \
     libssl-dev \
     uuid-dev \
     libgpgme11-dev \
+    libfuse-dev \
+    libglib2.0-dev \
     squashfs-tools \
-    libuuid-devel \
+    squashfs-tools-ng \
     libseccomp-dev \
     pkg-config \
     cryptsetup \
-    runc
+    runc \
+    uidmap 
 
 export GOLANG_VERSION=1.21.7
 export SINGULARITY_VERSION=4.1.2
