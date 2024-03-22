@@ -7,14 +7,18 @@ apt-get update && apt-get install -y \
     libssl-dev \
     uuid-dev \
     libgpgme11-dev \
+    libfuse-dev \
+    libglib2.0-dev \
     squashfs-tools \
+    squashfs-tools-ng \
     libseccomp-dev \
     pkg-config \
     cryptsetup \
-    runc
+    runc \
+    uidmap 
 
-export GOLANG_VERSION=1.20.5
-export SINGULARITY_VERSION=3.11.4
+export GOLANG_VERSION=1.21.7
+export SINGULARITY_VERSION=4.1.2
 
 mkdir -p /opt/go/${GOLANG_VERSION}
 mkdir -p /opt/singularity/${SINGULARITY_VERSION}
