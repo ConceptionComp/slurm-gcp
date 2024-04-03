@@ -12,8 +12,8 @@ rm /tmp/chrome.deb
 # Install ChromeDriver
 
 wget -N $CHROME_DRIVER_URL -P ~/
-unzip ~/chromedriver_linux64.zip -d ~/
-rm ~/chromedriver_linux64.zip
+unzip ~/chromedriver-linux64.zip -d ~/
+rm ~/chromedriver-linux64.zip
 mv -f ~/chromedriver /usr/local/bin/chromedriver
 chown root:root /usr/local/bin/chromedriver
 chmod 0755 /usr/local/bin/chromedriver
