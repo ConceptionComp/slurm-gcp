@@ -14,6 +14,7 @@ rm /tmp/chrome.deb
 wget -N $CHROME_DRIVER_URL -P ~/
 unzip ~/chromedriver-linux64.zip -d ~/
 rm ~/chromedriver-linux64.zip
-mv -f ~/chromedriver /usr/local/bin/chromedriver
+mv -f ~/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+rm -rf ~/chromedriver-linux64/
 chown root:root /usr/local/bin/chromedriver
 chmod 0755 /usr/local/bin/chromedriver
