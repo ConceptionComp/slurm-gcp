@@ -179,7 +179,7 @@ builds = [
     enable_integrity_monitoring = null
 
     ### storage ###
-    disk_size = 50
+    disk_size = 60
     disk_type = "pd-ssd"
   },
 ]
