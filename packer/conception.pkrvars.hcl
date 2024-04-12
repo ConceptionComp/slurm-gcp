@@ -63,7 +63,7 @@ tags = [
 # slurm_version = "22.05.8"
 
 # Disable some ansible roles here; they are enabled by default
-install_cuda = false
+install_cuda = true
 # install_ompi = false
 # install_lustre = false
 # install_gcsfuse = false
