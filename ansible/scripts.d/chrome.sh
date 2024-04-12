@@ -1,22 +1,20 @@
 #!/bin/bash
 set -eo pipefail
 
-CHROME_DRIVER_VERSION=111.0.5563.64
-
+LATEST_CHROME_RELEASE=$(curl -s https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json | jq '.channels.Stable')
+VERSION=$(echo "$LATEST_CHROME_RELEASE" | jq -r '.version')
+# CHROME_URL=$(echo "$LATEST_CHROME_RELEASE" | jq -r '.downloads.chrome[] | select(.platform == "linux64"')
+CHROME_DRIVER_URL=$(echo "$LATEST_CHROME_RELEASE" | jq -r '.downloads.chromedriver[] | select(.platform == "linux64") | .url')
 # Install Chrome Binary
-wget --no-verbose -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_DRIVER_VERSION}-1_amd64.deb
+wget --no-verbose -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${VERSION}-1_amd64.deb
 apt install -y /tmp/chrome.deb
 rm /tmp/chrome.deb
-# curl -sS -o - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add
-# echo "deb https://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
-# apt-get -y update
-# apt-get -y install google-chrome-stable
-
 # Install ChromeDriver
 
-wget -N https://chromedriver.storage.googleapis.com/$CHROME_DRIVER_VERSION/chromedriver_linux64.zip -P ~/
-unzip ~/chromedriver_linux64.zip -d ~/
-rm ~/chromedriver_linux64.zip
-mv -f ~/chromedriver /usr/local/bin/chromedriver
+wget -N $CHROME_DRIVER_URL -P ~/
+unzip ~/chromedriver-linux64.zip -d ~/
+rm ~/chromedriver-linux64.zip
+mv -f ~/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+rm -rf ~/chromedriver-linux64/
 chown root:root /usr/local/bin/chromedriver
 chmod 0755 /usr/local/bin/chromedriver
