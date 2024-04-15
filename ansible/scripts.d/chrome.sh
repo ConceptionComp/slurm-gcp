@@ -6,9 +6,9 @@ VERSION=$(echo "$LATEST_CHROME_RELEASE" | jq -r '.version')
 # CHROME_URL=$(echo "$LATEST_CHROME_RELEASE" | jq -r '.downloads.chrome[] | select(.platform == "linux64"')
 CHROME_DRIVER_URL=$(echo "$LATEST_CHROME_RELEASE" | jq -r '.downloads.chromedriver[] | select(.platform == "linux64") | .url')
 # Install Chrome Binary
-wget --no-verbose -O /tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${VERSION}-1_amd64.deb
-apt install -y /tmp/chrome.deb
-rm /tmp/chrome.deb
+wget --no-verbose -O /var/tmp/chrome.deb https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${VERSION}-1_amd64.deb
+apt install -y /var/tmp/chrome.deb
+rm /var/tmp/chrome.deb
 # Install ChromeDriver
 
 wget -N $CHROME_DRIVER_URL -P ~/
