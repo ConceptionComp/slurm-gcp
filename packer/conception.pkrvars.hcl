@@ -83,6 +83,12 @@ service_account_scopes = [
   "https://www.googleapis.com/auth/devstorage.full_control",
 ]
 
+disk_size = 50
+disk_type = "pd-ssd"
+
+machine_type = "n2-standard-4"
+preemptible  = false
+
 ### Builds ###
 
 builds = [
@@ -179,8 +185,7 @@ builds = [
     enable_integrity_monitoring = null
 
     ### storage ###
-    disk_size = 60
-    disk_type = "pd-ssd"
+    
   },
 ]
 
