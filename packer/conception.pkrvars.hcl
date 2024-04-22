@@ -63,7 +63,7 @@ tags = [
 # slurm_version = "22.05.8"
 
 # Disable some ansible roles here; they are enabled by default
-install_cuda = false
+install_cuda = true
 # install_ompi = false
 # install_lustre = false
 # install_gcsfuse = false
@@ -82,6 +82,12 @@ service_account_scopes = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/devstorage.full_control",
 ]
+
+disk_size = 50
+disk_type = "pd-ssd"
+
+machine_type = "n2-standard-4"
+preemptible  = false
 
 ### Builds ###
 
@@ -179,8 +185,7 @@ builds = [
     enable_integrity_monitoring = null
 
     ### storage ###
-    disk_size = 32
-    disk_type = "pd-ssd"
+    
   },
 ]
 
